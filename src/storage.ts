@@ -1,4 +1,5 @@
 import type { Session, Diag } from "./parse/types";
+import type { ChatThread } from "./chat/types";
 
 export type Run = {
   id: string;
@@ -9,6 +10,8 @@ export type Run = {
   session: Session;
   diagnostics: Diag[];
   fingerprint?: string;
+  originalText?: string;
+  originalName?: string;
   demo?: boolean;
 };
 /** What a run list needs. Kept in its own small store so listing never loads a session. */
@@ -24,9 +27,10 @@ export type RunSummary = {
 };
 
 const DB = "unroll-local";
-const VERSION = 2;
+const VERSION = 3;
 const RUNS = "runs";
 const SUMMARIES = "summaries";
+const CHATS = "chats";
 
 export function summarize(run: Run): RunSummary {
   const summary: RunSummary = {
@@ -47,6 +51,8 @@ function open(): Promise<IDBDatabase> {
     const r = indexedDB.open(DB, VERSION);
     r.onupgradeneeded = () => {
       const db = r.result;
+      if (!db.objectStoreNames.contains(CHATS))
+        db.createObjectStore(CHATS, { keyPath: "id" });
       if (!db.objectStoreNames.contains(RUNS))
         db.createObjectStore(RUNS, { keyPath: "id" });
       if (!db.objectStoreNames.contains(SUMMARIES)) {
@@ -142,8 +148,55 @@ export async function saveRun(run: Run): Promise<void> {
 }
 
 export async function deleteRun(id: string): Promise<void> {
-  await inTx<void>([RUNS, SUMMARIES], "readwrite", (t) => {
+  await inTx<void>([RUNS, SUMMARIES, CHATS], "readwrite", (t) => {
+    t.objectStore(CHATS).delete(id);
     t.objectStore(RUNS).delete(id);
     t.objectStore(SUMMARIES).delete(id);
   });
+}
+
+/** Chat text is local. Provider keys and request configuration are never stored here. */
+export async function loadChat(id: string): Promise<ChatThread | undefined> {
+  return inTx<ChatThread | undefined>([CHATS], "readonly", (t) =>
+    t.objectStore(CHATS).get(id),
+  );
+}
+export async function saveChat(thread: ChatThread): Promise<boolean> {
+  let saved = false;
+  // A late stream completion must not recreate a chat after its trajectory was removed.
+  await inTx<void>([RUNS, CHATS], "readwrite", (t) => {
+    const run = t.objectStore(RUNS).get(thread.id);
+    run.onsuccess = () => {
+      if (!run.result) return;
+      const messages = thread.messages.map(
+        ({ id, role, content, status, provider, model, error, context }) => ({
+          id,
+          role,
+          content,
+          status,
+          provider,
+          model,
+          error,
+          context: context
+            ? {
+                scope: context.scope,
+                includedEvents: context.includedEvents,
+                totalEvents: context.totalEvents,
+                excerptedEvents: context.excerptedEvents,
+                characters: context.characters,
+                eventNumbers: context.eventNumbers,
+                selectedEventId: context.selectedEventId,
+              }
+            : undefined,
+        }),
+      );
+      t.objectStore(CHATS).put({
+        id: thread.id,
+        draft: thread.draft,
+        messages,
+      });
+      saved = true;
+    };
+  });
+  return saved;
 }

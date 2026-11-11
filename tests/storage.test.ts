@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   deleteRun,
+  loadChat,
+  saveChat,
   loadRun,
   loadRunList,
   loadRuns,
@@ -263,7 +265,7 @@ describe("run storage", () => {
     });
     const list = await loadRunList();
     expect(log.filter((l) => l.startsWith("upgrade"))).toEqual([
-      "upgrade 1->2",
+      "upgrade 1->3",
     ]);
     expect(log).not.toContain("put runs"); // existing content is only read
     expect(list.map((r) => [r.id, r.eventCount])).toEqual([
@@ -308,8 +310,63 @@ describe("run storage", () => {
     expect(await loadRunList()).toEqual([]);
     expect(await loadRuns()).toEqual([]);
     expect([...databases.get("unroll-local")!.stores.keys()].sort()).toEqual([
+      "chats",
       "runs",
       "summaries",
     ]);
+  });
+});
+
+describe("local chat persistence", () => {
+  it("keeps chats separate per run and never persists incidental provider configuration", async () => {
+    await saveRun(run("a", 1));
+    await saveRun(run("b", 2));
+    await saveChat({
+      id: "a",
+      draft: "draft a",
+      apiKey: "synthetic-key-must-not-save",
+      config: { apiKey: "also-private" },
+      messages: [
+        {
+          id: "m1",
+          role: "user",
+          content: "A source question",
+          status: "complete",
+          apiKey: "message-extra-must-not-save",
+        },
+      ],
+    } as any);
+    await saveChat({ id: "b", draft: "draft b", messages: [] });
+    const saved = await loadChat("a");
+    expect(saved?.draft).toBe("draft a");
+    expect(saved?.messages[0].content).toBe("A source question");
+    expect(JSON.stringify(saved)).not.toContain("must-not-save");
+    expect(saved).not.toHaveProperty("config");
+    expect((await loadChat("b"))?.draft).toBe("draft b");
+    expect((await loadRunList())[0]).not.toHaveProperty("messages");
+  });
+  it("deletes a conversation with its trajectory and prevents late streaming writes from resurrecting it", async () => {
+    await saveRun(run("a", 1));
+    const thread = { id: "a", draft: "", messages: [] };
+    expect(await saveChat(thread)).toBe(true);
+    expect(await loadChat("a")).toBeDefined();
+    await deleteRun("a");
+    expect(await loadChat("a")).toBeUndefined();
+    expect(await saveChat(thread)).toBe(false);
+    expect(await loadChat("a")).toBeUndefined();
+  });
+  it("upgrades v2 libraries without reading or rewriting existing sessions", async () => {
+    const saved = run("old", 5);
+    databases.set("unroll-local", {
+      version: 2,
+      stores: new Map([
+        ["runs", new Map([[saved.id, saved]])],
+        ["summaries", new Map()],
+      ]),
+    });
+    expect(await loadChat("old")).toBeUndefined();
+    expect(log).toContain("upgrade 2->3");
+    expect(log).not.toContain("put runs");
+    expect(await loadRun("old")).toEqual(saved);
   });
 });

@@ -1,10 +1,18 @@
 import type { ParseResult } from "./types.ts";
+import { parseUnroll } from "./unroll.ts";
 import { parseAtif } from "./atif.ts";
 import { parseChat } from "./chat.ts";
 import { parseClaudeCode } from "./claudeCode.ts";
 import { parseCodex } from "./codex.ts";
 import { ITEM_TYPE } from "./items.ts";
-import { assertNestingDepth, Builder, isObj, ParseError, type LineRec, type Rec } from "./util.ts";
+import {
+  assertNestingDepth,
+  Builder,
+  isObj,
+  ParseError,
+  type LineRec,
+  type Rec,
+} from "./util.ts";
 
 export type {
   Actor,
@@ -157,6 +165,7 @@ function fromDocument(doc: unknown): ParseResult {
       `This file holds a single JSON ${doc === null ? "null" : typeof doc}, not a trajectory. ${SUPPORTED}`,
     );
   }
+  if (doc.schema_version === "unroll-v1") return parseUnroll(doc, b);
   if (looksAtif(doc)) return parseAtif(doc, doc.steps, b);
   for (const key of WRAPPER_KEYS) {
     const arr = doc[key];

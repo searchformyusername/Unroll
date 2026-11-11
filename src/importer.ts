@@ -38,6 +38,8 @@ export function parseRun(
           name,
           bytes,
           importedAt: Date.now(),
+          originalText: text,
+          originalName: name,
           ...data.result,
         });
     };
