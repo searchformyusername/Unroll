@@ -57,6 +57,7 @@ import {
 } from "./storage";
 import TrajectoryList from "./TrajectoryList";
 import Appearance from "./Appearance";
+import { readViewOptions, saveViewOptions } from "./viewOptions";
 const ChatAgent = lazy(() => import("./chat/ChatAgent"));
 import { useChatWorkspace } from "./chat/useChatWorkspace";
 import {
@@ -226,8 +227,10 @@ export default function App() {
     [expanded, setExpanded] = useState(false),
     [overrides, setOverrides] = useState<Set<string>>(new Set()),
     [limit, setLimit] = useState(100),
-    [showUsage, setShowUsage] = useState(false),
-    [showBranches, setShowBranches] = useState(false),
+    [showUsage, setShowUsage] = useState(() => readViewOptions().showUsage),
+    [showBranches, setShowBranches] = useState(
+      () => readViewOptions().showBranches,
+    ),
     [options, setOptions] = useState(false),
     [modal, setModal] = useState(false),
     [mode, setMode] = useState<"file" | "url">("file"),
@@ -246,6 +249,12 @@ export default function App() {
     [split, setSplit] = useState(60),
     [readerHidden, setReaderHidden] = useState(false),
     [resizing, setResizing] = useState(false);
+  useEffect(() => {
+    if (!saveViewOptions({ showUsage, showBranches }))
+      setNotice(
+        "View options could not be saved in this browser. They will apply in this tab.",
+      );
+  }, [showUsage, showBranches]);
   const viewOptionsRef = useRef<HTMLDivElement>(null);
   const viewOptionsTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
