@@ -224,6 +224,28 @@ export default function App() {
     [split, setSplit] = useState(60),
     [readerHidden, setReaderHidden] = useState(false),
     [resizing, setResizing] = useState(false);
+  const viewOptionsRef = useRef<HTMLDivElement>(null);
+  const viewOptionsTrigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!options) return;
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !viewOptionsRef.current?.contains(event.target))
+        setOptions(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      viewOptionsTrigger.current?.focus({ preventScroll: true });
+      setOptions(false);
+    };
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("keydown", escape, true);
+    return () => {
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("keydown", escape, true);
+    };
+  }, [options]);
   const workbenchRef = useRef<HTMLDivElement>(null);
   const pendingJump = useRef<string | null>(null);
   const keyboardAnchor = useRef(0.48);
@@ -1078,10 +1100,11 @@ export default function App() {
                         </button>
                       ))}
                     </div>
-                    <div className="view-options">
+                    <div className="view-options" ref={viewOptionsRef}>
                       <button
                         className="icon-button"
                         title="View options"
+                        ref={viewOptionsTrigger}
                         aria-label="View options"
                         aria-expanded={options}
                         onClick={() => setOptions(!options)}
