@@ -270,8 +270,9 @@ export default function TrajectoryList({
           >
             <FileJson2 size={16} />
             <span>
-              <strong title={run.name}>{run.name}</strong>
-              <small>{size(run.bytes)}</small>
+              <strong title={`${run.name} · ${size(run.bytes)}`}>
+                {run.name}
+              </strong>
             </span>
           </button>
         )}

@@ -12,6 +12,7 @@ Verified locally with Node.js 22.23.2 and Chromium on 2026-11-11.
 - Sidebar: dragging created a group, focused and selected its default name, accepted another trajectory, and preserved membership after refresh. Synthetic test runs were removed through the app. Run renaming and duplicate-content import were exercised.
 - Split pane: dragging changed its width; dragging to the right edge hid it; selecting another event while hidden and restoring the reader showed the current event.
 - Persistence: refresh restored saved runs. The sidebar loads summaries separately from full session content.
+- Compact layout: at the same 1280×800 browser viewport, the header reduced from 105px to 72px, collapsed rows from 73px to 54px, and fully visible events increased from four to eight. A search match remained visible inside its single-line excerpt.
 - Responsive layout: desktop and 390px mobile layouts were inspected. Mobile uses an event list/reader navigation flow.
 
 Tests include malformed and truncated input, unknown formats, duplicate tool-call IDs, incomplete usage records, missing result IDs, Unicode highlighting, large output clipping, escaped HTML and blocked remote images, URL failures and size caps, storage migration, and group membership integrity.

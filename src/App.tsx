@@ -33,6 +33,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import unrollIcon from "./assets/unroll.svg";
 import type { Event as TraceEvent, Usage } from "./parse/types";
 import { analyze, formatSpan, matchExcerpt, foldQuery } from "./analyze";
 import { buildMetrics } from "./metrics";
@@ -121,7 +122,7 @@ function EventIcon({ event }: { event: TraceEvent }) {
 function Logo() {
   return (
     <span className="logo-symbol" aria-hidden="true">
-      <img src={`${import.meta.env.BASE_URL}unroll.svg`} alt="" />
+      <img src={unrollIcon} alt="" />
     </span>
   );
 }
@@ -1002,7 +1003,7 @@ export default function App() {
                         timing?.byEvent.get(prev?.id || "")?.stepKey;
                     const preview =
                       q && analysis
-                        ? matchExcerpt(analysis, e, q, 210) || ""
+                        ? matchExcerpt(analysis, e, q, 90) || ""
                         : e.kind === "tool_call"
                           ? analysis?.previews.get(e.id) || "Tool call"
                           : excerpt(
@@ -1213,14 +1214,16 @@ export default function App() {
                   >
                     <ArrowLeft size={17} />
                   </button>
-                  <div>
-                    <span className="reader-caption">
-                      {overview
-                        ? "RUN METRICS"
-                        : selected
-                          ? `EVENT ${selected.idx + 1}${selected.step !== undefined ? ` · STEP ${selected.step}` : ""}`
-                          : "DETAILS"}
-                    </span>
+                  <div className="reader-title-line">
+                    {!overview && (
+                      <span className="reader-caption">
+                        {overview
+                          ? "RUN METRICS"
+                          : selected
+                            ? `EVENT ${selected.idx + 1}${selected.step !== undefined ? ` · STEP ${selected.step}` : ""}`
+                            : "DETAILS"}
+                      </span>
+                    )}
                     <h2>
                       {overview
                         ? "Run metrics"
