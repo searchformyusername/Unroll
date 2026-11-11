@@ -1,5 +1,14 @@
-import type { Actor } from './types.ts';
-import { Builder, contentText, idOf, isObj, parseArgs, partText, str, toolOutput } from './util.ts';
+import type { Actor } from "./types.ts";
+import {
+  Builder,
+  contentText,
+  idOf,
+  isObj,
+  parseArgs,
+  partText,
+  str,
+  toolOutput,
+} from "./util.ts";
 
 /** Shared context for every event emitted from one source record / message. */
 export interface Ctx {
@@ -12,11 +21,20 @@ export interface Ctx {
   n: number;
 }
 
-export const nextId = (c: Ctx): string => (c.n++ === 0 ? c.id : `${c.id}:${c.n - 1}`);
+export const nextId = (c: Ctx): string =>
+  c.n++ === 0 ? c.id : `${c.id}:${c.n - 1}`;
 
 function flushText(b: Builder, c: Ctx, text: string): void {
   if (!text.trim()) return;
-  b.push({ id: nextId(c), actor: c.actor, kind: 'message', ts: c.ts, text, raw: c.raw, step: c.step });
+  b.push({
+    id: nextId(c),
+    actor: c.actor,
+    kind: "message",
+    ts: c.ts,
+    text,
+    raw: c.raw,
+    step: c.step,
+  });
 }
 
 /**
@@ -26,7 +44,7 @@ function flushText(b: Builder, c: Ctx, text: string): void {
  * one message so the UI never shows fragmented bubbles.
  */
 export function emitContent(b: Builder, content: unknown, c: Ctx): void {
-  if (typeof content === 'string') {
+  if (typeof content === "string") {
     flushText(b, c, content);
     return;
   }
@@ -34,46 +52,75 @@ export function emitContent(b: Builder, content: unknown, c: Ctx): void {
     if (isObj(content)) emitContent(b, [content], c);
     return;
   }
-  let text = '';
+  let text = "";
   for (const block of content) {
     const t = isObj(block) ? block.type : undefined;
-    if (isObj(block) && typeof t === 'string') {
-      if (t === 'thinking' || t === 'reasoning' || t === 'redacted_thinking') {
+    if (isObj(block) && typeof t === "string") {
+      if (t === "thinking" || t === "reasoning" || t === "redacted_thinking") {
         flushText(b, c, text);
-        text = '';
-        const th = str(block.thinking) ?? str(block.text) ?? contentText(block.summary);
-        if (th.trim()) b.push({ id: nextId(c), actor: 'assistant', kind: 'thinking', ts: c.ts, text: th, raw: c.raw, step: c.step });
+        text = "";
+        const th =
+          str(block.thinking) ?? str(block.text) ?? contentText(block.summary);
+        if (th.trim())
+          b.push({
+            id: nextId(c),
+            actor: "assistant",
+            kind: "thinking",
+            ts: c.ts,
+            text: th,
+            raw: c.raw,
+            step: c.step,
+          });
         continue;
       }
-      if (t === 'tool_use' || t === 'server_tool_use' || t === 'mcp_tool_use') {
+      if (t === "tool_use" || t === "server_tool_use" || t === "mcp_tool_use") {
         flushText(b, c, text);
-        text = '';
+        text = "";
         b.push({
-          id: nextId(c), actor: 'assistant', kind: 'tool_call', ts: c.ts,
-          callId: idOf(block.id), name: str(block.name) ?? 'unknown', input: parseArgs(block.input),
-          raw: c.raw, step: c.step,
+          id: nextId(c),
+          actor: "assistant",
+          kind: "tool_call",
+          ts: c.ts,
+          callId: idOf(block.id),
+          name: str(block.name) ?? "unknown",
+          input: parseArgs(block.input),
+          raw: c.raw,
+          step: c.step,
         });
         continue;
       }
-      if (t === 'tool_result' || t.endsWith('_tool_result')) {
+      if (t === "tool_result" || t.endsWith("_tool_result")) {
         flushText(b, c, text);
-        text = '';
+        text = "";
         b.push({
-          id: nextId(c), actor: 'tool', kind: 'tool_result', ts: c.ts,
-          callId: idOf(block.tool_use_id), output: toolOutput(block.content),
+          id: nextId(c),
+          actor: "tool",
+          kind: "tool_result",
+          ts: c.ts,
+          callId: idOf(block.tool_use_id),
+          output: toolOutput(block.content),
           isError: block.is_error === true ? true : undefined,
-          raw: c.raw, step: c.step,
+          raw: c.raw,
+          step: c.step,
         });
         continue;
       }
     }
     const pt = partText(block);
     if (pt !== undefined) {
-      if (pt) text = text ? text + '\n\n' + pt : pt;
+      if (pt) text = text ? text + "\n\n" + pt : pt;
     } else if (block !== null && block !== undefined) {
       flushText(b, c, text);
-      text = '';
-      b.push({ id: nextId(c), actor: c.actor, kind: 'unknown', ts: c.ts, name: typeof t === 'string' ? t : undefined, raw: block, step: c.step });
+      text = "";
+      b.push({
+        id: nextId(c),
+        actor: c.actor,
+        kind: "unknown",
+        ts: c.ts,
+        name: typeof t === "string" ? t : undefined,
+        raw: block,
+        step: c.step,
+      });
     }
   }
   flushText(b, c, text);

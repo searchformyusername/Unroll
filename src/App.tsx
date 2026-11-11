@@ -1,75 +1,1748 @@
-import {useDeferredValue,useEffect,useMemo,useRef,useState} from 'react';
-import {ArrowDown,ArrowLeft,ArrowRight,ArrowUpRight,BarChart3,Brain,Braces,Check,ChevronDown,ChevronLeft,ChevronRight,ChevronsDownUp,ChevronsUpDown,Clock3,FileJson2,FileUp,Github,Info,Link2,LoaderCircle,MessageSquare,PanelLeftClose,PanelLeftOpen,Pin,PinOff,Plus,Search,Settings2,Terminal,Trash2,X,XCircle} from 'lucide-react';
-import type {Event as TraceEvent,Usage} from './parse/types';
-import {analyze,formatSpan,matchExcerpt,foldQuery} from './analyze';
-import {buildMetrics} from './metrics';
-import {deleteRun,loadRun,loadRunList,saveRun,summarize,type Run,type RunSummary} from './storage';
-import TrajectoryList from './TrajectoryList';
-import {fetchText,MAX_BYTES,parseRun} from './importer';
-import {Content,Copy,Highlight,excerpt,stringify} from './reading';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUpRight,
+  BarChart3,
+  Brain,
+  Braces,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Clock3,
+  FileJson2,
+  FileUp,
+  Github,
+  Info,
+  Link2,
+  LoaderCircle,
+  MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pin,
+  PinOff,
+  Plus,
+  Search,
+  Settings2,
+  Terminal,
+  Trash2,
+  X,
+  XCircle,
+} from "lucide-react";
+import type { Event as TraceEvent, Usage } from "./parse/types";
+import { analyze, formatSpan, matchExcerpt, foldQuery } from "./analyze";
+import { buildMetrics } from "./metrics";
+import {
+  deleteRun,
+  loadRun,
+  loadRunList,
+  saveRun,
+  summarize,
+  type Run,
+  type RunSummary,
+} from "./storage";
+import TrajectoryList from "./TrajectoryList";
+import { fetchText, MAX_BYTES, parseRun } from "./importer";
+import { Content, Copy, Highlight, excerpt, stringify } from "./reading";
 
-type Filter='all'|'message'|'thinking'|'tool_call'|'errors';
-type ReaderTab='content'|'metrics'|'source';
-const FILTERS:{id:Filter;label:string}[]=[{id:'all',label:'All'},{id:'message',label:'Messages'},{id:'thinking',label:'Reasoning'},{id:'tool_call',label:'Tools'},{id:'errors',label:'Errors'}];
-const textOf=(e:TraceEvent)=>e.text||stringify(e.output??e.input??'');
-const fmt=(value:number|undefined)=>value===undefined?'—':value.toLocaleString('en-US');
-const ms=(value:number|undefined)=>value===undefined?'—':value<1000?`${Math.round(value)} ms`:formatSpan(value);
-const size=(n:number)=>n>=1048576?`${(n/1048576).toFixed(1)} MB`:`${Math.max(1,Math.round(n/1024))} KB`;
-const nameOf=(e:TraceEvent)=>e.kind==='tool_call'?e.name||'Tool call':e.kind==='thinking'?'Reasoning':e.kind==='usage'?'Token usage':e.kind==='tool_result'?'Tool result':e.kind==='unknown'?'Unknown record':e.actor==='assistant'?'Assistant':e.actor==='user'?'User':e.name?.replace(/_/g,' ')||'System';
-function toolCategory(name?:string){return /write|edit|replace|patch/i.test(name||'')?'change':/shell|terminal|exec|command/i.test(name||'')?'execute':/read|grep|search|list|find/i.test(name||'')?'read':'other';}
-function EventIcon({event}:{event:TraceEvent}){const Icon=event.kind==='thinking'?Brain:event.kind==='tool_call'||event.kind==='tool_result'?Terminal:event.kind==='message'?(event.actor==='assistant'?Brain:MessageSquare):event.kind==='usage'?BarChart3:Info;return <Icon size={14}/>;}
-function Logo(){return <span className="logo-symbol" aria-hidden="true"><img src={`${import.meta.env.BASE_URL}unroll.svg`} alt=""/></span>;}
-function Metric({label,value,note}:{label:string;value:string;note?:string}){return <div className="metric"><dt>{label}</dt><dd>{value}</dd>{note&&<small>{note}</small>}</div>;}
-function UsageMetrics({usage}:{usage?:Usage}){return <dl className="metric-grid"><Metric label="Input tokens" value={fmt(usage?.input)} note="Includes cached input"/><Metric label="Output tokens" value={fmt(usage?.output)}/><Metric label="Cache read" value={fmt(usage?.cacheRead)}/><Metric label="Cache write" value={fmt(usage?.cacheWrite)}/></dl>;}
-export default function App(){
- const [runs,setRuns]=useState<RunSummary[]>([]),[ready,setReady]=useState(false),[activeId,setActiveId]=useState(''),[selectedId,setSelectedId]=useState<string|null>(null),[query,setQuery]=useState(''),[filter,setFilter]=useState<Filter>('all'),[readerTab,setReaderTab]=useState<ReaderTab>('content'),[overview,setOverview]=useState(false),[expanded,setExpanded]=useState(false),[overrides,setOverrides]=useState<Set<string>>(new Set()),[limit,setLimit]=useState(100),[showUsage,setShowUsage]=useState(false),[showBranches,setShowBranches]=useState(false),[options,setOptions]=useState(false),[modal,setModal]=useState(false),[mode,setMode]=useState<'file'|'url'>('file'),[url,setUrl]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[removeId,setRemoveId]=useState<string|null>(null),[pinned,setPinned]=useState(true),[hoverNav,setHoverNav]=useState(false),[mobileNav,setMobileNav]=useState(false),[dragging,setDragging]=useState(false),[mobileReading,setMobileReading]=useState(false);
- const [currentRun,setCurrentRun]=useState<Run|null>(null),[runLoading,setRunLoading]=useState(false),[split,setSplit]=useState(46),[readerHidden,setReaderHidden]=useState(false),[resizing,setResizing]=useState(false);const workbenchRef=useRef<HTMLDivElement>(null);const pendingJump=useRef<string|null>(null);const [stageLimit,setStageLimit]=useState(100);const unsaved=useRef(new Map<string,Run>());
- const deferredQuery=useDeferredValue(query);const q=foldQuery(deferredQuery.trim());const fileRef=useRef<HTMLInputElement>(null),searchRef=useRef<HTMLInputElement>(null),modalRef=useRef<HTMLDialogElement>(null),deleteRef=useRef<HTMLDialogElement>(null),controller=useRef<AbortController|null>(null),listRef=useRef<HTMLDivElement>(null),readerRef=useRef<HTMLDivElement>(null),navToggleRef=useRef<HTMLButtonElement>(null);
- const activeSummary=runs.find(r=>r.id===activeId)||runs[0];const run=currentRun?.id===activeSummary?.id?currentRun:undefined;const events=useMemo(()=>run?.session.events||[],[run]);const analysis=useMemo(()=>run?analyze(run.session):null,[run]);const timing=useMemo(()=>run?buildMetrics(run.session):null,[run]);const stages=useMemo(()=>new Map(timing?.steps.map(step=>[step.key,step])||[]),[timing]);
- const results=useMemo(()=>{const map=new Map<string,TraceEvent[]>();for(const e of events){if(e.kind==='tool_result'&&e.callId){const list=map.get(e.callId)||[];list.push(e);map.set(e.callId,list);}}return map;},[events]);const callIds=useMemo(()=>new Set(events.filter(e=>e.kind==='tool_call').map(e=>e.callId)),[events]);
- const base=useMemo(()=>events.filter(e=>!(e.kind==='tool_result'&&e.callId&&callIds.has(e.callId))&&(showUsage||e.kind!=='usage')&&(showBranches||!e.offPath)),[events,callIds,showUsage,showBranches]);
- const visible=useMemo(()=>base.filter(e=>filter==='all'||e.kind===filter||filter==='errors'&&(e.isError||e.callId&&results.get(e.callId)?.some(r=>r.isError))).filter(e=>!q||analysis?.searchIndex.get(e.id)?.includes(q)),[base,filter,q,analysis,results]);
- const selected=events.find(e=>e.id===selectedId)||null;const position=visible.findIndex(e=>e.id===selected?.id);const toolCount=events.filter(e=>e.kind==='tool_call'&&!e.offPath).length;
- const counts=useMemo(()=>new Map(FILTERS.map(f=>[f.id,base.filter(e=>f.id==='all'||e.kind===f.id||f.id==='errors'&&(e.isError||e.callId&&results.get(e.callId)?.some(r=>r.isError))).length])),[base,results]);
- useEffect(()=>{let live=true;loadRunList().then(saved=>{if(live){const actual=saved.filter(r=>!r.demo);setRuns(prev=>[...prev,...actual.filter(r=>!prev.some(p=>p.id===r.id))]);setActiveId(prev=>prev||actual[0]?.id||'');}}).catch(()=>{if(live)setNotice('Browser storage is unavailable. Imports will remain open in this tab.');}).finally(()=>{if(live)setReady(true);});return()=>{live=false;controller.current?.abort();};},[]);
- useEffect(()=>{const id=activeSummary?.id;if(!id){setCurrentRun(null);return;}if(currentRun?.id===id)return;let live=true;setRunLoading(true);const cached=unsaved.current.get(id);(cached?Promise.resolve(cached):loadRun(id)).then(value=>{if(live){if(value)setCurrentRun(value);else setNotice('This saved trajectory is unavailable. Remove it and import the original file again.');}}).catch(()=>{if(live)setNotice('Could not load the saved trajectory. Please retry.');}).finally(()=>{if(live)setRunLoading(false);});return()=>{live=false;};},[activeSummary?.id]);
- useEffect(()=>{if(!resizing)return;let lastX:number|undefined;const move=(e:PointerEvent)=>{lastX=e.clientX;const rect=workbenchRef.current?.getBoundingClientRect();if(rect)setSplit(Math.max(28,Math.min(76,(e.clientX-rect.left)/rect.width*100)));};const up=(e:PointerEvent)=>{const rect=workbenchRef.current?.getBoundingClientRect();if(rect&&(lastX??e.clientX)>rect.right-48)setReaderHidden(true);setResizing(false);};document.body.style.cursor='col-resize';document.body.style.userSelect='none';window.addEventListener('pointermove',move);window.addEventListener('pointerup',up,{once:true});return()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);document.body.style.cursor='';document.body.style.userSelect='';};},[resizing]);
- useEffect(()=>{setQuery('');setFilter('all');setSelectedId(events.find(e=>e.kind!=='usage'&&!e.offPath)?.id||null);setOverview(false);setReaderTab('content');setLimit(100);setOverrides(new Set());setExpanded(false);setMobileReading(false);setStageLimit(100);},[run?.id]);
- useEffect(()=>{setLimit(100);if(q){const first=visible[0];if(!first)setSelectedId(null);else if(!selectedId||!visible.some(e=>e.id===selectedId))setSelectedId(first.id);}listRef.current?.scrollTo({top:0});},[q,filter,showUsage,showBranches]);
- useEffect(()=>{readerRef.current?.scrollTo({top:0});},[selectedId,readerTab]);
- useEffect(()=>{const listener=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();searchRef.current?.focus();}if((e.metaKey||e.ctrlKey)&&e.key==='o'){e.preventDefault();if(ready&&!busy){setMode('file');setError('');setModal(true);}}if(e.key==='Escape'){setOptions(false);setMobileNav(false);}};window.addEventListener('keydown',listener);const leave=(e:DragEvent)=>{if(!e.relatedTarget)setDragging(false);};window.addEventListener('dragleave',leave);const endDrag=()=>setDragging(false);window.addEventListener('dragend',endDrag);return()=>{window.removeEventListener('keydown',listener);window.removeEventListener('dragleave',leave);window.removeEventListener('dragend',endDrag);};},[ready,busy]);
- useEffect(()=>{if(modal)modalRef.current?.showModal();else modalRef.current?.close();},[modal]);useEffect(()=>{if(removeId)deleteRef.current?.showModal();else deleteRef.current?.close();},[removeId]);
- const source=useMemo(()=>readerTab==='source'&&selected?stringify(selected.raw??selected):'',[readerTab,selected]);
- function select(e:TraceEvent){setSelectedId(e.id);setOverview(false);setReaderTab('content');setMobileReading(true);}
- function jump(id:string){const e=events.find(e=>e.id===id);if(!e)return;pendingJump.current=id;setFilter('all');setQuery('');if(e.offPath)setShowBranches(true);if(e.kind==='usage')setShowUsage(true);select(e);}
- useEffect(()=>{const id=pendingJump.current;if(!id)return;const row=document.getElementById('event-'+id);if(row){row.scrollIntoView({block:'center'});row.querySelector<HTMLButtonElement>('.row-main')?.focus({preventScroll:true});pendingJump.current=null;}},[selectedId,visible]);
+type Filter = "all" | "message" | "thinking" | "tool_call" | "errors";
+type ReaderTab = "content" | "metrics" | "source";
+const FILTERS: { id: Filter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "message", label: "Messages" },
+  { id: "thinking", label: "Reasoning" },
+  { id: "tool_call", label: "Tools" },
+  { id: "errors", label: "Errors" },
+];
+const textOf = (e: TraceEvent) =>
+  e.text || stringify(e.output ?? e.input ?? "");
+const fmt = (value: number | undefined) =>
+  value === undefined ? "—" : value.toLocaleString("en-US");
+const ms = (value: number | undefined) =>
+  value === undefined
+    ? "—"
+    : value < 1000
+      ? `${Math.round(value)} ms`
+      : formatSpan(value);
+const money = (value: number | undefined) =>
+  value === undefined
+    ? "—"
+    : value !== 0 && Math.abs(value) < 0.0001
+      ? `$${value.toPrecision(3)}`
+      : `$${value.toFixed(4)}`;
+const size = (n: number) =>
+  n >= 1048576
+    ? `${(n / 1048576).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(n / 1024))} KB`;
+const nameOf = (e: TraceEvent) =>
+  e.kind === "tool_call"
+    ? e.name || "Tool call"
+    : e.kind === "thinking"
+      ? "Reasoning"
+      : e.kind === "usage"
+        ? "Token usage"
+        : e.kind === "tool_result"
+          ? "Tool result"
+          : e.kind === "unknown"
+            ? "Unknown record"
+            : e.actor === "assistant"
+              ? "Assistant"
+              : e.actor === "user"
+                ? "User"
+                : e.name?.replace(/_/g, " ") || "System";
+function toolCategory(name?: string) {
+  return /write|edit|replace|patch/i.test(name || "")
+    ? "change"
+    : /shell|terminal|exec|command/i.test(name || "")
+      ? "execute"
+      : /read|grep|search|list|find/i.test(name || "")
+        ? "read"
+        : "other";
+}
+function EventIcon({ event }: { event: TraceEvent }) {
+  const Icon =
+    event.kind === "thinking"
+      ? Brain
+      : event.kind === "tool_call" || event.kind === "tool_result"
+        ? Terminal
+        : event.kind === "message"
+          ? event.actor === "assistant"
+            ? Brain
+            : MessageSquare
+          : event.kind === "usage"
+            ? BarChart3
+            : Info;
+  return <Icon size={14} />;
+}
+function Logo() {
+  return (
+    <span className="logo-symbol" aria-hidden="true">
+      <img src={`${import.meta.env.BASE_URL}unroll.svg`} alt="" />
+    </span>
+  );
+}
+function Metric({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string;
+  note?: string;
+}) {
+  return (
+    <div className="metric">
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+      {note && <small>{note}</small>}
+    </div>
+  );
+}
+function UsageMetrics({ usage }: { usage?: Usage }) {
+  return (
+    <dl className="metric-grid">
+      <Metric
+        label="Input tokens"
+        value={fmt(usage?.input)}
+        note="Includes cached input"
+      />
+      <Metric label="Output tokens" value={fmt(usage?.output)} />
+      <Metric label="Cache read" value={fmt(usage?.cacheRead)} />
+      <Metric label="Cache write" value={fmt(usage?.cacheWrite)} />
+      <Metric label="Reasoning tokens" value={fmt(usage?.reasoning)} />
+      <Metric
+        label="Reported cost"
+        value={money(usage?.costUsd)}
+        note="USD · recorded by source"
+      />
+    </dl>
+  );
+}
+export default function App() {
+  const [libraryLoaded, setLibraryLoaded] = useState(false);
+  const [runs, setRuns] = useState<RunSummary[]>([]),
+    [ready, setReady] = useState(false),
+    [activeId, setActiveId] = useState(""),
+    [selectedId, setSelectedId] = useState<string | null>(null),
+    [query, setQuery] = useState(""),
+    [filter, setFilter] = useState<Filter>("all"),
+    [readerTab, setReaderTab] = useState<ReaderTab>("content"),
+    [overview, setOverview] = useState(false),
+    [expanded, setExpanded] = useState(false),
+    [overrides, setOverrides] = useState<Set<string>>(new Set()),
+    [limit, setLimit] = useState(100),
+    [showUsage, setShowUsage] = useState(false),
+    [showBranches, setShowBranches] = useState(false),
+    [options, setOptions] = useState(false),
+    [modal, setModal] = useState(false),
+    [mode, setMode] = useState<"file" | "url">("file"),
+    [url, setUrl] = useState(""),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [notice, setNotice] = useState(""),
+    [removeId, setRemoveId] = useState<string | null>(null),
+    [pinned, setPinned] = useState(true),
+    [hoverNav, setHoverNav] = useState(false),
+    [mobileNav, setMobileNav] = useState(false),
+    [dragging, setDragging] = useState(false),
+    [mobileReading, setMobileReading] = useState(false);
+  const [currentRun, setCurrentRun] = useState<Run | null>(null),
+    [runLoading, setRunLoading] = useState(false),
+    [split, setSplit] = useState(46),
+    [readerHidden, setReaderHidden] = useState(false),
+    [resizing, setResizing] = useState(false);
+  const workbenchRef = useRef<HTMLDivElement>(null);
+  const pendingJump = useRef<string | null>(null);
+  const [stageLimit, setStageLimit] = useState(100);
+  const unsaved = useRef(new Map<string, Run>());
+  const runIndex = useRef<RunSummary[]>([]);
+  useEffect(() => {
+    runIndex.current = runs;
+  }, [runs]);
+  const deferredQuery = useDeferredValue(query);
+  const q = foldQuery(deferredQuery.trim());
+  const fileRef = useRef<HTMLInputElement>(null),
+    searchRef = useRef<HTMLInputElement>(null),
+    modalRef = useRef<HTMLDialogElement>(null),
+    deleteRef = useRef<HTMLDialogElement>(null),
+    controller = useRef<AbortController | null>(null),
+    listRef = useRef<HTMLDivElement>(null),
+    readerRef = useRef<HTMLDivElement>(null),
+    navToggleRef = useRef<HTMLButtonElement>(null);
+  const activeSummary = runs.find((r) => r.id === activeId) || runs[0];
+  const run = currentRun?.id === activeSummary?.id ? currentRun : undefined;
+  const events = useMemo(() => run?.session.events || [], [run]);
+  const analysis = useMemo(() => (run ? analyze(run.session) : null), [run]);
+  const timing = useMemo(() => (run ? buildMetrics(run.session) : null), [run]);
+  const stages = useMemo(
+    () => new Map(timing?.steps.map((step) => [step.key, step]) || []),
+    [timing],
+  );
+  const results = useMemo(() => {
+    const map = new Map<string, TraceEvent[]>();
+    for (const e of events) {
+      if (e.kind === "tool_result" && e.callId) {
+        const list = map.get(e.callId) || [];
+        list.push(e);
+        map.set(e.callId, list);
+      }
+    }
+    return map;
+  }, [events]);
+  const callIds = useMemo(
+    () =>
+      new Set(
+        events.filter((e) => e.kind === "tool_call").map((e) => e.callId),
+      ),
+    [events],
+  );
+  const base = useMemo(
+    () =>
+      events.filter(
+        (e) =>
+          !(e.kind === "tool_result" && e.callId && callIds.has(e.callId)) &&
+          (showUsage || e.kind !== "usage") &&
+          (showBranches || !e.offPath),
+      ),
+    [events, callIds, showUsage, showBranches],
+  );
+  const visible = useMemo(
+    () =>
+      base
+        .filter(
+          (e) =>
+            filter === "all" ||
+            e.kind === filter ||
+            (filter === "errors" &&
+              (e.isError ||
+                (e.callId && results.get(e.callId)?.some((r) => r.isError)))),
+        )
+        .filter((e) => !q || analysis?.searchIndex.get(e.id)?.includes(q)),
+    [base, filter, q, analysis, results],
+  );
+  const selected = events.find((e) => e.id === selectedId) || null;
+  const position = visible.findIndex((e) => e.id === selected?.id);
+  const toolCount = events.filter(
+    (e) => e.kind === "tool_call" && !e.offPath,
+  ).length;
+  const counts = useMemo(
+    () =>
+      new Map(
+        FILTERS.map((f) => [
+          f.id,
+          base.filter(
+            (e) =>
+              f.id === "all" ||
+              e.kind === f.id ||
+              (f.id === "errors" &&
+                (e.isError ||
+                  (e.callId && results.get(e.callId)?.some((r) => r.isError)))),
+          ).length,
+        ]),
+      ),
+    [base, results],
+  );
+  useEffect(() => {
+    let live = true;
+    loadRunList()
+      .then((saved) => {
+        if (live) {
+          setLibraryLoaded(true);
+          const actual = saved.filter((r) => !r.demo);
+          setRuns((prev) => [
+            ...prev,
+            ...actual.filter((r) => !prev.some((p) => p.id === r.id)),
+          ]);
+          setActiveId((prev) => prev || actual[0]?.id || "");
+        }
+      })
+      .catch(() => {
+        if (live)
+          setNotice(
+            "Browser storage is unavailable. Imports will remain open in this tab.",
+          );
+      })
+      .finally(() => {
+        if (live) setReady(true);
+      });
+    return () => {
+      live = false;
+      controller.current?.abort();
+    };
+  }, []);
+  useEffect(() => {
+    const id = activeSummary?.id;
+    if (!id) {
+      setCurrentRun(null);
+      return;
+    }
+    if (currentRun?.id === id) return;
+    let live = true;
+    setRunLoading(true);
+    const cached = unsaved.current.get(id);
+    (cached ? Promise.resolve(cached) : loadRun(id))
+      .then((value) => {
+        if (live) {
+          if (value) setCurrentRun(value);
+          else
+            setNotice(
+              "This saved trajectory is unavailable. Remove it and import the original file again.",
+            );
+        }
+      })
+      .catch(() => {
+        if (live)
+          setNotice("Could not load the saved trajectory. Please retry.");
+      })
+      .finally(() => {
+        if (live) setRunLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [activeSummary?.id]);
+  useEffect(() => {
+    if (!resizing) return;
+    let lastX: number | undefined;
+    const move = (e: PointerEvent) => {
+      lastX = e.clientX;
+      const rect = workbenchRef.current?.getBoundingClientRect();
+      if (rect)
+        setSplit(
+          Math.max(
+            28,
+            Math.min(76, ((e.clientX - rect.left) / rect.width) * 100),
+          ),
+        );
+    };
+    const up = (e: PointerEvent) => {
+      const rect = workbenchRef.current?.getBoundingClientRect();
+      if (rect && (lastX ?? e.clientX) > rect.right - 48) setReaderHidden(true);
+      setResizing(false);
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", move);
+    const cancel = () => setResizing(false);
+    window.addEventListener("pointerup", up, { once: true });
+    window.addEventListener("pointercancel", cancel, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [resizing]);
+  useEffect(() => {
+    setQuery("");
+    setFilter("all");
+    setSelectedId(
+      events.find((e) => e.kind !== "usage" && !e.offPath)?.id || null,
+    );
+    setOverview(false);
+    setReaderTab("content");
+    setLimit(100);
+    setOverrides(new Set());
+    setExpanded(false);
+    setMobileReading(false);
+    setStageLimit(100);
+  }, [run?.id]);
+  useEffect(() => {
+    setLimit(100);
+    if (q && !pendingJump.current) {
+      const first = visible[0];
+      if (!first) setSelectedId(null);
+      else if (!selectedId || !visible.some((e) => e.id === selectedId))
+        setSelectedId(first.id);
+    }
+    if (!pendingJump.current) listRef.current?.scrollTo({ top: 0 });
+  }, [q, filter, showUsage, showBranches]);
+  useEffect(() => {
+    readerRef.current?.scrollTo({ top: 0 });
+  }, [selectedId, readerTab]);
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "o") {
+        e.preventDefault();
+        if (ready && !busy) {
+          setMode("file");
+          setError("");
+          setModal(true);
+        }
+      }
+      if (e.key === "Escape") {
+        setOptions(false);
+        setMobileNav(false);
+      }
+    };
+    window.addEventListener("keydown", listener);
+    const leave = (e: DragEvent) => {
+      if (!e.relatedTarget) setDragging(false);
+    };
+    window.addEventListener("dragleave", leave);
+    const endDrag = () => setDragging(false);
+    window.addEventListener("dragend", endDrag);
+    return () => {
+      window.removeEventListener("keydown", listener);
+      window.removeEventListener("dragleave", leave);
+      window.removeEventListener("dragend", endDrag);
+    };
+  }, [ready, busy]);
+  useEffect(() => {
+    if (modal) modalRef.current?.showModal();
+    else modalRef.current?.close();
+  }, [modal]);
+  useEffect(() => {
+    if (removeId) deleteRef.current?.showModal();
+    else deleteRef.current?.close();
+  }, [removeId]);
+  function totalNote(
+    key:
+      | "inputTokens"
+      | "outputTokens"
+      | "cacheReadTokens"
+      | "cacheWriteTokens"
+      | "reasoningTokens"
+      | "costUsd",
+  ) {
+    const source = analysis?.totalsSource?.[key];
+    return source === "reported"
+      ? "Reported session total"
+      : source === "summed"
+        ? `Sum of ${analysis?.requestCount} recorded requests`
+        : analysis?.incompleteTotals?.includes(key)
+          ? "Not recorded on every request"
+          : "Not recorded";
+  }
+  const source = useMemo(
+    () =>
+      readerTab === "source" && selected
+        ? stringify(selected.raw ?? selected)
+        : "",
+    [readerTab, selected],
+  );
+  function select(e: TraceEvent) {
+    setSelectedId(e.id);
+    setOverview(false);
+    setReaderTab("content");
+    setMobileReading(true);
+  }
+  function jump(id: string) {
+    const e = events.find((e) => e.id === id);
+    if (!e) return;
+    pendingJump.current = id;
+    setFilter("all");
+    setQuery("");
+    if (e.offPath) setShowBranches(true);
+    if (e.kind === "usage") setShowUsage(true);
+    select(e);
+  }
+  useEffect(() => {
+    const id = pendingJump.current;
+    if (!id || deferredQuery !== query) return;
+    const row = document.getElementById("event-" + id);
+    if (row) {
+      row.scrollIntoView({ block: "center" });
+      row
+        .querySelector<HTMLButtonElement>(".row-main")
+        ?.focus({ preventScroll: true });
+      pendingJump.current = null;
+    }
+  }, [selectedId, visible, deferredQuery, query]);
 
- function openImport(which:'file'|'url'){setMode(which);setError('');setModal(true);}
- async function acceptRun(next:Run){setCurrentRun(next);setRuns(prev=>[summarize(next),...prev]);setActiveId(next.id);setMobileNav(false);try{await saveRun(next);}catch{unsaved.current.set(next.id,next);setNotice('Could not save this run in browser storage. It remains open in this tab.');}}
- async function importFiles(files:File[]){if(busy||!ready||!files.length)return;setError('');setBusy(true);const abort=new AbortController();controller.current=abort;const failures:string[]=[];let added=0;try{for(const file of files){if(abort.signal.aborted)break;try{if(file.size>MAX_BYTES)throw new Error('The limit is 25 MB per file.');const text=await file.text();if(abort.signal.aborted)break;await acceptRun(await parseRun(text,file.name,file.size,abort.signal));added++;}catch(e){if(abort.signal.aborted)break;failures.push(`${file.name}: ${e instanceof Error?e.message:'Import failed.'}`);}}if(failures.length)setError(failures.join('\n'));else if(added)setModal(false);}finally{setBusy(false);controller.current=null;}}
- async function importUrl(){if(busy||!ready)return;setError('');setBusy(true);const abort=new AbortController();controller.current=abort;const timer=setTimeout(()=>abort.abort('timeout'),30000);try{const data=await fetchText(url,abort.signal);const next=await parseRun(data.text,data.name,data.bytes,abort.signal);await acceptRun(next);setModal(false);setUrl('');}catch(e){setError(abort.signal.aborted?(abort.signal.reason==='timeout'?'The request timed out after 30 seconds. Try a local file.':'Import cancelled.'):e instanceof Error?e.message:'Could not load this URL.');}finally{clearTimeout(timer);setBusy(false);controller.current=null;}}
- async function removeRun(){if(!removeId)return;try{await deleteRun(removeId);unsaved.current.delete(removeId);setRuns(prev=>prev.filter(r=>r.id!==removeId));setRemoveId(null);}catch{setNotice('Could not remove the saved trajectory. Please retry.');setRemoveId(null);}}
- const stageMax=timing?.maxNextGapMs||1;const renderLimit=Math.max(limit,position+1);const pickedTiming=selected?timing?.byEvent.get(selected.id):undefined;const related=selected?.callId?results.get(selected.callId)||[]:[];
- return <div className={`shell ${pinned?'nav-pinned':'nav-collapsed'}`} onDragOver={e=>{if(e.dataTransfer.types.includes('Files')){e.preventDefault();setDragging(true);}}} onDrop={e=>{e.preventDefault();setDragging(false);if(!busy&&ready){openImport('file');void importFiles(Array.from(e.dataTransfer.files));}}}>
- <div className="nav-rail" onMouseEnter={()=>{if(!pinned)setHoverNav(true);}}><button ref={navToggleRef} className="icon-button" title="Open sidebar" aria-label="Open sidebar" onClick={()=>{if(window.matchMedia('(max-width:760px)').matches)setMobileNav(true);else setHoverNav(v=>!v);}}><PanelLeftOpen size={18}/></button><button className="rail-import icon-button" aria-label="Import trajectory" title="Import trajectory" disabled={!ready} onClick={()=>openImport('file')}><Plus size={19}/></button></div>
- {mobileNav&&<button className="nav-backdrop" aria-label="Close sidebar" onClick={()=>{setMobileNav(false);navToggleRef.current?.focus();}}/>}
- <aside className={`sidebar ${!pinned&&hoverNav?'hover-open':''} ${mobileNav?'mobile-open':''}`} onMouseLeave={()=>setHoverNav(false)} aria-label="Trajectories"><div className="sidebar-top"><div className="brand"><Logo/><span>Unroll</span></div><button className="icon-button desktop-pin" aria-label={pinned?'Collapse sidebar':'Pin sidebar'} title={pinned?'Collapse sidebar':'Pin sidebar'} onClick={()=>{setPinned(!pinned);setHoverNav(false);}}>{pinned?<PanelLeftClose size={17}/>:<Pin size={16}/>}</button><button className="icon-button mobile-close" aria-label="Close sidebar" onClick={()=>setMobileNav(false)}><X size={17}/></button></div><div className="file-actions"><button className="import-button" disabled={!ready||busy} onClick={()=>openImport('file')}><Plus size={16}/> Import files <kbd>⌘ O</kbd></button><button className="url-button" disabled={!ready||busy} onClick={()=>openImport('url')}><Link2 size={15}/> Load from URL</button></div><TrajectoryList runs={runs} activeId={activeSummary?.id} ready={ready} onSelect={id=>{setActiveId(id);setMobileNav(false);setHoverNav(false);}} onRemove={setRemoveId} onNotice={setNotice}/>
- <div className="sidebar-bottom"><a href="https://github.com/searchformyusername/Unroll" target="_blank" rel="noopener noreferrer"><Github size={15}/> GitHub <ArrowUpRight size={12}/></a>{!pinned&&<button className="icon-button" title="Pin sidebar" aria-label="Pin sidebar" onClick={()=>{setPinned(true);setHoverNav(false);}}><Pin size={14}/></button>}</div></aside>
- <main className={`main ${mobileReading?'mobile-reading':''}`}>
- {notice&&<div className="notice" role="status"><Info size={14}/><span>{notice}</span><button className="icon-button" aria-label="Dismiss notice" onClick={()=>setNotice('')}><X size={14}/></button></div>}
- {!run?<div className="empty">{runLoading?<><LoaderCircle size={24} className="spin"/><p>Loading trajectory…</p></>:<><FileJson2 size={32}/><h1>Open a trajectory</h1><p>JSON or JSONL · ATIF, chat transcripts, Claude Code, Codex</p><button className="import-button" disabled={!ready} onClick={()=>openImport('file')}><FileUp size={16}/> Choose files</button><span>Or drop files anywhere · 25 MB per file</span></>}</div>:<>
- <header className="run-heading"><div className="run-heading-text"><h1 title={run.name}>{run.name}</h1><div className="run-meta"><span>{String(run.session.meta.model||run.format)}</span><span>·</span><span>{run.session.meta.stepCount?`${run.session.meta.stepCount} steps`:`${base.length} events`}</span><span>·</span><span>{toolCount} tool calls</span><span>·</span><span><Clock3 size={11}/>{ms(timing?.durationMs)}</span></div></div><button className={`overview-button ${overview?'active':''}`} aria-label="Run metrics" aria-pressed={overview} onClick={()=>{setOverview(!overview);setMobileReading(true);}}><BarChart3 size={15}/><span>Run metrics</span></button></header>
- <div ref={workbenchRef} style={{'--split':`${split}%`} as React.CSSProperties} className={`workbench ${readerHidden?'reader-hidden':''} ${resizing?'resizing':''}`} onKeyDown={e=>{if(!['ArrowUp','ArrowDown'].includes(e.key)||e.altKey||e.ctrlKey||e.metaKey||modal||removeId)return;const target=e.target as HTMLElement;if(target.closest('input,textarea,select,[contenteditable="true"]')||!target.closest('.event-row,.reader-column'))return;const next=position+(e.key==='ArrowDown'?1:-1);if(next<0||next>=visible.length)return;e.preventDefault();setLimit(n=>Math.max(n,next+1));select(visible[next]);requestAnimationFrame(()=>{const row=document.getElementById('event-'+visible[next].id);row?.querySelector<HTMLButtonElement>('.row-main')?.focus({preventScroll:true});row?.scrollIntoView({block:'nearest'});});}}><section className="timeline-column"><div className="timeline-controls"><div className="search-field"><Search size={16}/><input ref={searchRef} aria-label="Search trajectory" placeholder="Search messages, reasoning, tools…" value={query} onChange={e=>setQuery(e.target.value)}/>{query?<button className="icon-button" aria-label="Clear search" onClick={()=>setQuery('')}><X size={14}/></button>:<kbd>⌘ K</kbd>}</div><div className="filter-toolbar"><div className="filters" aria-label="Event filters">{FILTERS.map(f=><button key={f.id} className={filter===f.id?'active':''} aria-pressed={filter===f.id} onClick={()=>setFilter(f.id)}>{f.label}{f.id==='errors'&&!!counts.get('errors')&&<span>{counts.get('errors')}</span>}</button>)}</div><div className="view-options"><button className="icon-button" title="View options" aria-label="View options" aria-expanded={options} onClick={()=>setOptions(!options)}><Settings2 size={15}/></button>{options&&<div className="options-popover"><label><input type="checkbox" checked={showUsage} onChange={e=>setShowUsage(e.target.checked)}/>Token usage events</label><label><input type="checkbox" checked={showBranches} onChange={e=>setShowBranches(e.target.checked)}/>Alternate branches</label></div>}</div></div><div className="list-tools"><span>{visible.length} {q?'matching ':''}events</span><div><button aria-label={expanded?'Collapse all events':'Expand all events'} onClick={()=>{setExpanded(!expanded);setOverrides(new Set());}}>{expanded?<ChevronsDownUp size={13}/>:<ChevronsUpDown size={13}/>} {expanded?'Collapse all':'Expand all'}</button></div></div></div>
- <div className="event-list" ref={listRef}>{run.diagnostics.length>0&&<details className="diagnostics"><summary>{run.diagnostics.length} import notes</summary><ul>{run.diagnostics.map((d,i)=><li key={i}>{d.line?`Line ${d.line}: `:''}{d.reason}</li>)}</ul></details>}{visible.slice(0,renderLimit).map((e,i)=>{const open=overrides.has(e.id)?!expanded:expanded;const prev=visible[i-1];const stage=timing?.byEvent.get(e.id);const step=stage?.stepKey?stages.get(stage.stepKey):undefined;const isNewStep=!!stage?.stepKey&&stage.stepKey!==timing?.byEvent.get(prev?.id||'')?.stepKey;const preview=q&&analysis?matchExcerpt(analysis,e,q,210)||'':e.kind==='tool_call'?analysis?.previews.get(e.id)||'Tool call':excerpt(e.text||e.kind==='tool_result'&&textOf(e)||e.name||'',q,180);const hasError=e.isError||e.callId&&results.get(e.callId)?.some(r=>r.isError);return <div key={e.id} id={'event-'+e.id} className="event-block">{isNewStep&&<div className="step-heading"><span>{step?.label}</span><span className="step-line"><i style={{width:`${Math.min(100,(stage?.nextGapMs||0)/stageMax*100)}%`}}/></span><span title="Time until the next recorded source step. May include processing, tools, or idle time.">{stage?.nextGapMs!==undefined?`+${ms(stage.nextGapMs)}`:'—'}</span></div>}<article className={`event-row type-${e.kind} actor-${e.actor} tool-${e.kind==='tool_call'?toolCategory(e.name):'none'} ${selectedId===e.id&&!overview?'selected':''} ${hasError?'has-error':''}`}><div className="row-top"><button className="row-main" onClick={()=>select(e)} aria-label={`Read event ${e.idx+1}: ${nameOf(e)}`} aria-current={selectedId===e.id?'true':undefined}><span className={`event-icon kind-${e.kind}`}><EventIcon event={e}/></span><span className="row-title"><strong><Highlight text={nameOf(e)} query={q}/></strong>{e.offPath&&<span className="event-tag">Alternate</span>}{e.sidechain&&<span className="event-tag">Subagent</span>}<span className="row-number">{String(e.idx+1).padStart(2,'0')}</span></span><span className="row-preview"><Highlight text={preview} query={q}/></span></button><button className="row-expand icon-button" aria-label={`${open?'Collapse':'Expand'} event ${e.idx+1}`} aria-expanded={open} onClick={()=>setOverrides(prev=>{const next=new Set(prev);if(next.has(e.id))next.delete(e.id);else next.add(e.id);return next;})}>{open?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</button></div>{open&&<div className="inline-content"><Content text={textOf(e)} query={q} markdown={e.kind==='message'||e.kind==='thinking'} compact/>{e.kind==='tool_call'&&(results.get(e.callId||'')||[]).map((r,j)=><div key={r.id} className="inline-result"><div className="section-label">Output{j>0?` ${j+1}`:''}</div><Content text={textOf(r)} query={q} compact/></div>)}</div>}</article></div>;})}{!visible.length&&<div className="no-results"><Search size={22}/><p>No matching events</p><button className="text-button" onClick={()=>{setQuery('');setFilter('all');}}>Clear filters</button></div>}{visible.length>renderLimit&&<button className="show-more" onClick={()=>setLimit(Math.max(renderLimit,limit)+100)}>Show next {Math.min(100,visible.length-renderLimit)} events <ArrowDown size={14}/></button>}</div></section>
- <div className="split-handle" role="separator" tabIndex={0} aria-label="Resize event reader" aria-orientation="vertical" aria-valuemin={28} aria-valuemax={76} aria-valuenow={Math.round(split)} title="Drag to resize. Drag to the right edge to hide." onPointerDown={e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);setResizing(true);}} onKeyDown={e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();e.stopPropagation();setSplit(n=>Math.max(28,Math.min(76,n+(e.key==='ArrowRight'?4:-4))));}if(e.key==='End'){e.preventDefault();setReaderHidden(true);}if(e.key==='Home'){e.preventDefault();setSplit(46);}}}><span/></div><button className="reader-restore" aria-label="Open event reader" title="Open event reader" onClick={()=>{setReaderHidden(false);setSplit(46);}}><ChevronLeft size={17}/></button><section className="reader-column" aria-label="Event reading pane"><div className="reader-heading"><button className="mobile-back icon-button" aria-label="Back to events" onClick={()=>setMobileReading(false)}><ArrowLeft size={17}/></button><div><span className="reader-caption">{overview?'RUN METRICS':selected?`EVENT ${selected.idx+1}${selected.step!==undefined?` · STEP ${selected.step}`:''}`:'DETAILS'}</span><h2>{overview?'Run metrics':selected?nameOf(selected):'Select an event'}</h2></div>{!overview&&selected&&<div className="event-navigation"><button className="icon-button" aria-label="Previous event" disabled={position<=0} onClick={()=>select(visible[position-1])}><ChevronLeft size={17}/></button><button className="icon-button" aria-label="Next event" disabled={position<0||position>=visible.length-1} onClick={()=>select(visible[position+1])}><ChevronRight size={17}/></button></div>}</div>
- {!overview&&selected&&<div className="reader-tabs" role="tablist" aria-label="Event details">{(['content','metrics','source'] as ReaderTab[]).map(t=><button key={t} role="tab" aria-selected={readerTab===t} className={readerTab===t?'active':''} onClick={()=>setReaderTab(t)}>{t==='content'?'Content':t==='metrics'?'Metrics':'Source'}</button>)}<span>{selected.ts&&Number.isFinite(Date.parse(selected.ts))?new Date(selected.ts).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit',second:'2-digit'}):''}</span></div>}
- <div className="reader-scroll" ref={readerRef} key={`${selectedId}-${overview}-${readerTab}`}>
- {overview?<><div className="reader-section"><h3>Timing</h3><dl className="metric-grid"><Metric label="Timestamp span" value={ms(timing?.durationMs)} note="First to last recorded timestamp"/>{timing?.recordedDurationMs!==undefined&&<Metric label="Recorded turn time" value={ms(timing.recordedDurationMs)} note="Sum of source-reported turn durations"/>}<Metric label="Time to first token" value={timing?.ttftMs?.length?`${ms(timing.ttftMs.reduce((a,b)=>a+b,0)/timing.ttftMs.length)} avg`:'—'} note={timing?.ttftMs?.length?`${timing.ttftMs.length} reported measurements`:'Not recorded in this file'}/></dl></div><div className="reader-section"><h3>Tokens</h3><dl className="metric-grid"><Metric label="Input tokens" value={fmt(analysis?.inputTokens)} note={analysis?.tokenSource==='summed'?`Across ${analysis.requestCount} requests · includes cache`:'Includes cached input'}/><Metric label="Output tokens" value={fmt(analysis?.outputTokens)}/><Metric label="Cache read" value={fmt(analysis?.cacheReadTokens)}/><Metric label="Cache share of input" value={analysis?.cacheReadTokens!==undefined&&analysis.inputTokens?`${(analysis.cacheReadTokens/analysis.inputTokens*100).toFixed(1)}%`:'—'}/></dl>{analysis?.inputTokens===undefined&&<p className="data-note">This file does not report token usage.</p>}</div>{!!analysis?.notes.length&&<div className="reader-section"><h3>Observations</h3>{analysis.notes.map(note=><button key={note.id} className="observation" onClick={()=>jump(note.eventId)}><span>{note.title}<ArrowUpRight size={13}/></span><p>{note.detail}</p></button>)}</div>}<div className="reader-section"><h3>Step intervals</h3><p className="data-note">Time to the next recorded step. These intervals can include reasoning, tools, and idle time; they are not individual tool durations.</p><div className="stage-table">{timing?.steps.slice(0,stageLimit).map(step=><button key={step.key} onClick={()=>jump(step.eventId)}><span>{step.label}</span><span className="stage-track"><i style={{width:`${Math.min(100,(step.nextGapMs||0)/stageMax*100)}%`}}/></span><strong>{ms(step.nextGapMs)}</strong></button>)}</div>{(timing?.steps.length||0)>stageLimit&&<button className="show-more" onClick={()=>setStageLimit(n=>n+100)}>Show next intervals <ArrowDown size={13}/></button>}</div>{!!run.session.meta.hiddenReasoningCount&&<p className="data-note">{String(run.session.meta.hiddenReasoningCount)} reasoning records are encrypted by the provider.</p>}</>:selected?readerTab==='source'?<div className="reader-section"><div className="section-label">Original event<Copy text={source}/></div><Content text={source} query={q}/></div>:readerTab==='metrics'?<><div className="reader-section"><h3>Timing</h3><dl className="metric-grid"><Metric label="Elapsed in run" value={ms(pickedTiming?.elapsedMs)}/><Metric label="To next source step" value={ms(pickedTiming?.nextGapMs)} note="Timestamp interval, not tool duration"/><Metric label="Recorded duration" value={ms(pickedTiming?.durationMs)} note={pickedTiming?.durationMs===undefined?'Not recorded':'Reported by the source'}/><Metric label="Time to first token" value={ms(pickedTiming?.ttftMs)} note={pickedTiming?.ttftMs===undefined?'Not recorded':'Reported by the source'}/></dl></div><div className="reader-section"><h3>Tokens</h3><UsageMetrics usage={pickedTiming?.usage||selected.usage}/>{!pickedTiming?.usage&&!selected.usage&&<p className="data-note">No token usage is attached to this source step.</p>}</div></>:<>{selected.kind==='tool_call'?<><div className="reader-section"><div className="section-label">Input<Copy text={stringify(selected.input)}/></div><Content text={stringify(selected.input)} query={q}/></div>{related.length?related.map((r,j)=><div className="reader-section" key={r.id}><div className="section-label">Output{related.length>1?` ${j+1}`:''}{r.isError&&<span className="error-label">Error reported</span>}<Copy text={textOf(r)}/></div><Content text={textOf(r)} query={q}/></div>):<p className="data-note">No matching result was recorded for this call.</p>}</>:<div className="reader-section"><div className="section-label">{selected.kind==='thinking'?'Reasoning':selected.kind==='message'?'Message':'Content'}<Copy text={textOf(selected)}/></div><Content text={textOf(selected)} query={q} markdown={selected.kind==='message'||selected.kind==='thinking'}/></div>}{(pickedTiming?.nextGapMs!==undefined||pickedTiming?.durationMs!==undefined)&&<div className="reading-timing"><Clock3 size={13}/>{pickedTiming.durationMs!==undefined?`${ms(pickedTiming.durationMs)} reported duration`:`${ms(pickedTiming.nextGapMs)} until the next recorded step`}<button onClick={()=>setReaderTab('metrics')}>Metrics <ArrowRight size={12}/></button></div>}</>:<div className="reader-empty">Select an event to read its content.</div>}
- </div></section></div></>}
- </main>
- <input ref={fileRef} type="file" accept=".json,.jsonl,.ndjson,.traj,application/json" multiple hidden onChange={e=>{void importFiles(Array.from(e.target.files||[]));e.target.value='';}}/>
- <dialog ref={modalRef} className="import-dialog" aria-labelledby="import-title" onCancel={e=>{if(busy){e.preventDefault();controller.current?.abort();}else setModal(false);}} onClick={e=>{if(e.target===e.currentTarget&&!busy)setModal(false);}}><div className="dialog-heading"><h2 id="import-title">{mode==='file'?'Import trajectories':'Load from URL'}</h2><button className="icon-button" aria-label="Close import" onClick={()=>{controller.current?.abort();setModal(false);}}><X size={18}/></button></div>{mode==='file'?<button className="drop-zone" disabled={busy} onClick={()=>fileRef.current?.click()}>{busy?<LoaderCircle className="spin" size={24}/>:<FileUp size={24}/>}<strong>{busy?'Importing…':'Choose files or drop them here'}</strong><span>JSON, JSONL, NDJSON, .traj · Up to 25 MB each</span></button>:<form onSubmit={e=>{e.preventDefault();void importUrl();}}><label htmlFor="trajectory-url">Direct file URL</label><input id="trajectory-url" type="url" value={url} placeholder="https://example.com/trajectory.json" required disabled={busy} onChange={e=>setUrl(e.target.value)}/><p className="data-note">The source must allow browser requests (CORS). Credentials are not sent.</p><button className="import-button" disabled={busy||!url}>{busy?<LoaderCircle className="spin" size={15}/>:<Link2 size={15}/>} {busy?'Loading…':'Load trajectory'}</button></form>}{busy&&<button className="text-button cancel-import" onClick={()=>controller.current?.abort()}>Cancel import</button>}{error&&<div className="import-error" role="alert"><XCircle size={16}/><span>{error}</span></div>}<p className="import-footnote">Files are processed locally and saved in this browser.</p></dialog>
- <dialog ref={deleteRef} className="delete-dialog" aria-labelledby="delete-title" onCancel={()=>setRemoveId(null)}><h2 id="delete-title">Remove trajectory?</h2><p>The saved browser copy will be deleted. Your original file is unchanged.</p><div><button className="quiet-button" onClick={()=>setRemoveId(null)}>Cancel</button><button className="danger-button" onClick={()=>void removeRun()}>Remove</button></div></dialog>
- {dragging&&<div className="global-drop" onDragLeave={e=>{if(e.target===e.currentTarget)setDragging(false);}}><FileUp size={32}/><span>Drop to import</span></div>}
- </div>;
+  function openImport(which: "file" | "url") {
+    setMode(which);
+    setError("");
+    setModal(true);
+  }
+  async function acceptRun(next: Run) {
+    const duplicate = next.fingerprint
+      ? runIndex.current.find((r) => r.fingerprint === next.fingerprint)
+      : undefined;
+    if (duplicate) {
+      setActiveId(duplicate.id);
+      setMobileNav(false);
+      return;
+    }
+    runIndex.current = [summarize(next), ...runIndex.current];
+    setCurrentRun(next);
+    setRuns((prev) => [summarize(next), ...prev]);
+    setActiveId(next.id);
+    setMobileNav(false);
+    try {
+      await saveRun(next);
+    } catch {
+      unsaved.current.set(next.id, next);
+      setNotice(
+        "Could not save this run in browser storage. It remains open in this tab.",
+      );
+    }
+  }
+  async function importFiles(files: File[]) {
+    if (busy || !ready || !files.length) return;
+    setError("");
+    setBusy(true);
+    const abort = new AbortController();
+    controller.current = abort;
+    const failures: string[] = [];
+    let added = 0;
+    try {
+      for (const file of files) {
+        if (abort.signal.aborted) break;
+        try {
+          if (file.size > MAX_BYTES)
+            throw new Error("The limit is 25 MB per file.");
+          const text = await file.text();
+          if (abort.signal.aborted) break;
+          await acceptRun(
+            await parseRun(text, file.name, file.size, abort.signal),
+          );
+          added++;
+        } catch (e) {
+          if (abort.signal.aborted) break;
+          failures.push(
+            `${file.name}: ${e instanceof Error ? e.message : "Import failed."}`,
+          );
+        }
+      }
+      if (failures.length) setError(failures.join("\n"));
+      else if (added) setModal(false);
+    } finally {
+      setBusy(false);
+      controller.current = null;
+    }
+  }
+  async function importUrl() {
+    if (busy || !ready) return;
+    setError("");
+    setBusy(true);
+    const abort = new AbortController();
+    controller.current = abort;
+    const timer = setTimeout(() => abort.abort("timeout"), 30000);
+    try {
+      const data = await fetchText(url, abort.signal);
+      const next = await parseRun(
+        data.text,
+        data.name,
+        data.bytes,
+        abort.signal,
+      );
+      await acceptRun(next);
+      setModal(false);
+      setUrl("");
+    } catch (e) {
+      setError(
+        abort.signal.aborted
+          ? abort.signal.reason === "timeout"
+            ? "The request timed out after 30 seconds. Try a local file."
+            : "Import cancelled."
+          : e instanceof Error
+            ? e.message
+            : "Could not load this URL.",
+      );
+    } finally {
+      clearTimeout(timer);
+      setBusy(false);
+      controller.current = null;
+    }
+  }
+  async function renameTrajectory(id: string, name: string) {
+    try {
+      const original =
+        currentRun?.id === id
+          ? currentRun
+          : unsaved.current.get(id) || (await loadRun(id));
+      if (!original) throw new Error("Not found");
+      const next = { ...original, name };
+      if (unsaved.current.has(id)) unsaved.current.set(id, next);
+      else await saveRun(next);
+      if (currentRun?.id === id) setCurrentRun(next);
+      setRuns((prev) => prev.map((r) => (r.id === id ? { ...r, name } : r)));
+    } catch {
+      setNotice("Could not save the trajectory name. Please retry.");
+    }
+  }
+  async function removeRun() {
+    if (!removeId) return;
+    try {
+      await deleteRun(removeId);
+      unsaved.current.delete(removeId);
+      setRuns((prev) => prev.filter((r) => r.id !== removeId));
+      setRemoveId(null);
+    } catch {
+      setNotice("Could not remove the saved trajectory. Please retry.");
+      setRemoveId(null);
+    }
+  }
+  const stageMax = timing?.maxNextGapMs || 1;
+  const renderLimit = Math.max(limit, position + 1);
+  const pickedTiming = selected ? timing?.byEvent.get(selected.id) : undefined;
+  const related = selected?.callId ? results.get(selected.callId) || [] : [];
+  return (
+    <div
+      className={`shell ${pinned ? "nav-pinned" : "nav-collapsed"}`}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("Files")) {
+          e.preventDefault();
+          setDragging(true);
+        }
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        if (!busy && ready) {
+          openImport("file");
+          void importFiles(Array.from(e.dataTransfer.files));
+        }
+      }}
+    >
+      <div
+        className="nav-rail"
+        onMouseEnter={() => {
+          if (!pinned) setHoverNav(true);
+        }}
+      >
+        <button
+          ref={navToggleRef}
+          className="icon-button"
+          title="Open sidebar"
+          aria-label="Open sidebar"
+          onClick={() => {
+            if (window.matchMedia("(max-width:760px)").matches)
+              setMobileNav(true);
+            else setHoverNav((v) => !v);
+          }}
+        >
+          <PanelLeftOpen size={18} />
+        </button>
+        <button
+          className="rail-import icon-button"
+          aria-label="Import trajectory"
+          title="Import trajectory"
+          disabled={!ready}
+          onClick={() => openImport("file")}
+        >
+          <Plus size={19} />
+        </button>
+      </div>
+      {mobileNav && (
+        <button
+          className="nav-backdrop"
+          aria-label="Close sidebar"
+          onClick={() => {
+            setMobileNav(false);
+            navToggleRef.current?.focus();
+          }}
+        />
+      )}
+      <aside
+        className={`sidebar ${!pinned && hoverNav ? "hover-open" : ""} ${mobileNav ? "mobile-open" : ""}`}
+        onMouseLeave={() => setHoverNav(false)}
+        aria-label="Trajectories"
+      >
+        <div className="sidebar-top">
+          <div className="brand">
+            <Logo />
+            <span>Unroll</span>
+          </div>
+          <button
+            className="icon-button desktop-pin"
+            aria-label={pinned ? "Collapse sidebar" : "Pin sidebar"}
+            title={pinned ? "Collapse sidebar" : "Pin sidebar"}
+            onClick={() => {
+              setPinned(!pinned);
+              setHoverNav(false);
+            }}
+          >
+            {pinned ? <PanelLeftClose size={17} /> : <Pin size={16} />}
+          </button>
+          <button
+            className="icon-button mobile-close"
+            aria-label="Close sidebar"
+            onClick={() => setMobileNav(false)}
+          >
+            <X size={17} />
+          </button>
+        </div>
+        <div className="file-actions">
+          <button
+            className="import-button"
+            disabled={!ready || busy}
+            onClick={() => openImport("file")}
+          >
+            <Plus size={16} /> Import files <kbd>⌘ O</kbd>
+          </button>
+          <button
+            className="url-button"
+            disabled={!ready || busy}
+            onClick={() => openImport("url")}
+          >
+            <Link2 size={15} /> Load from URL
+          </button>
+        </div>
+        <TrajectoryList
+          runs={runs}
+          activeId={activeSummary?.id}
+          ready={ready}
+          canPrune={libraryLoaded}
+          onSelect={(id) => {
+            setActiveId(id);
+            setMobileNav(false);
+            setHoverNav(false);
+          }}
+          onRemove={setRemoveId}
+          onNotice={setNotice}
+          onRename={(id, name) => void renameTrajectory(id, name)}
+        />
+        <div className="sidebar-bottom">
+          <a
+            href="https://github.com/searchformyusername/Unroll"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Github size={15} /> GitHub <ArrowUpRight size={12} />
+          </a>
+          {!pinned && (
+            <button
+              className="icon-button"
+              title="Pin sidebar"
+              aria-label="Pin sidebar"
+              onClick={() => {
+                setPinned(true);
+                setHoverNav(false);
+              }}
+            >
+              <Pin size={14} />
+            </button>
+          )}
+        </div>
+      </aside>
+      <main className={`main ${mobileReading ? "mobile-reading" : ""}`}>
+        {notice && (
+          <div className="notice" role="status">
+            <Info size={14} />
+            <span>{notice}</span>
+            <button
+              className="icon-button"
+              aria-label="Dismiss notice"
+              onClick={() => setNotice("")}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        {!run ? (
+          <div className="empty">
+            {runLoading ? (
+              <>
+                <LoaderCircle size={24} className="spin" />
+                <p>Loading trajectory…</p>
+              </>
+            ) : (
+              <>
+                <FileJson2 size={32} />
+                <h1>Open a trajectory</h1>
+                <p>
+                  JSON or JSONL · ATIF, chat transcripts, Claude Code, Codex
+                </p>
+                <button
+                  className="import-button"
+                  disabled={!ready}
+                  onClick={() => openImport("file")}
+                >
+                  <FileUp size={16} /> Choose files
+                </button>
+                <span>Or drop files anywhere · 25 MB per file</span>
+              </>
+            )}
+          </div>
+        ) : (
+          <>
+            <header className="run-heading">
+              <div className="run-heading-text">
+                <h1 title={run.name}>{run.name}</h1>
+                <div className="run-meta">
+                  <span>{String(run.session.meta.model || run.format)}</span>
+                  <span>·</span>
+                  <span>
+                    {run.session.meta.stepCount
+                      ? `${run.session.meta.stepCount} steps`
+                      : `${base.length} events`}
+                  </span>
+                  <span>·</span>
+                  <span>{toolCount} tool calls</span>
+                  <span>·</span>
+                  <span>
+                    <Clock3 size={11} />
+                    {ms(timing?.durationMs)}
+                  </span>
+                </div>
+              </div>
+              <button
+                className={`overview-button ${overview ? "active" : ""}`}
+                aria-label="Run metrics"
+                aria-pressed={overview}
+                onClick={() => {
+                  setOverview(!overview);
+                  setMobileReading(true);
+                }}
+              >
+                <BarChart3 size={15} />
+                <span>Run metrics</span>
+              </button>
+            </header>
+            <div
+              ref={workbenchRef}
+              style={{ "--split": `${split}%` } as React.CSSProperties}
+              className={`workbench ${readerHidden ? "reader-hidden" : ""} ${resizing ? "resizing" : ""}`}
+              onKeyDown={(e) => {
+                if (
+                  !["ArrowUp", "ArrowDown"].includes(e.key) ||
+                  e.altKey ||
+                  e.ctrlKey ||
+                  e.metaKey ||
+                  modal ||
+                  removeId
+                )
+                  return;
+                const target = e.target as HTMLElement;
+                if (
+                  target.closest(
+                    'input,textarea,select,[contenteditable="true"]',
+                  ) ||
+                  !target.closest(".event-row,.reader-column")
+                )
+                  return;
+                const next = position + (e.key === "ArrowDown" ? 1 : -1);
+                if (next < 0 || next >= visible.length) return;
+                e.preventDefault();
+                setLimit((n) => Math.max(n, next + 1));
+                select(visible[next]);
+                requestAnimationFrame(() => {
+                  const row = document.getElementById(
+                    "event-" + visible[next].id,
+                  );
+                  row
+                    ?.querySelector<HTMLButtonElement>(".row-main")
+                    ?.focus({ preventScroll: true });
+                  row?.scrollIntoView({ block: "nearest" });
+                });
+              }}
+            >
+              <section className="timeline-column">
+                <div className="timeline-controls">
+                  <div className="search-field">
+                    <Search size={16} />
+                    <input
+                      ref={searchRef}
+                      aria-label="Search trajectory"
+                      placeholder="Search messages, reasoning, tools…"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                    />
+                    {query ? (
+                      <button
+                        className="icon-button"
+                        aria-label="Clear search"
+                        onClick={() => setQuery("")}
+                      >
+                        <X size={14} />
+                      </button>
+                    ) : (
+                      <kbd>⌘ K</kbd>
+                    )}
+                  </div>
+                  <div className="filter-toolbar">
+                    <div className="filters" aria-label="Event filters">
+                      {FILTERS.map((f) => (
+                        <button
+                          key={f.id}
+                          className={filter === f.id ? "active" : ""}
+                          aria-pressed={filter === f.id}
+                          onClick={() => setFilter(f.id)}
+                        >
+                          {f.label}
+                          {f.id === "errors" && !!counts.get("errors") && (
+                            <span>{counts.get("errors")}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="view-options">
+                      <button
+                        className="icon-button"
+                        title="View options"
+                        aria-label="View options"
+                        aria-expanded={options}
+                        onClick={() => setOptions(!options)}
+                      >
+                        <Settings2 size={15} />
+                      </button>
+                      {options && (
+                        <div className="options-popover">
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={showUsage}
+                              onChange={(e) => setShowUsage(e.target.checked)}
+                            />
+                            Token usage events
+                          </label>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={showBranches}
+                              onChange={(e) =>
+                                setShowBranches(e.target.checked)
+                              }
+                            />
+                            Alternate branches
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="list-tools">
+                    <span>
+                      {visible.length} {q ? "matching " : ""}events
+                    </span>
+                    <div>
+                      <button
+                        aria-label={
+                          expanded ? "Collapse all events" : "Expand all events"
+                        }
+                        onClick={() => {
+                          setExpanded(!expanded);
+                          setOverrides(new Set());
+                        }}
+                      >
+                        {expanded ? (
+                          <ChevronsDownUp size={13} />
+                        ) : (
+                          <ChevronsUpDown size={13} />
+                        )}{" "}
+                        {expanded ? "Collapse all" : "Expand all"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="event-list" ref={listRef}>
+                  {run.diagnostics.length > 0 && (
+                    <details className="diagnostics">
+                      <summary>{run.diagnostics.length} import notes</summary>
+                      <ul>
+                        {run.diagnostics.map((d, i) => (
+                          <li key={i}>
+                            {d.line ? `Line ${d.line}: ` : ""}
+                            {d.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                  {visible.slice(0, renderLimit).map((e, i) => {
+                    const open = overrides.has(e.id) ? !expanded : expanded;
+                    const prev = visible[i - 1];
+                    const stage = timing?.byEvent.get(e.id);
+                    const step = stage?.stepKey
+                      ? stages.get(stage.stepKey)
+                      : undefined;
+                    const isNewStep =
+                      !!stage?.stepKey &&
+                      stage.stepKey !==
+                        timing?.byEvent.get(prev?.id || "")?.stepKey;
+                    const preview =
+                      q && analysis
+                        ? matchExcerpt(analysis, e, q, 210) || ""
+                        : e.kind === "tool_call"
+                          ? analysis?.previews.get(e.id) || "Tool call"
+                          : excerpt(
+                              e.text ||
+                                (e.kind === "tool_result" && textOf(e)) ||
+                                e.name ||
+                                "",
+                              q,
+                              180,
+                            );
+                    const hasError =
+                      e.isError ||
+                      (e.callId &&
+                        results.get(e.callId)?.some((r) => r.isError));
+                    return (
+                      <div
+                        key={e.id}
+                        id={"event-" + e.id}
+                        className="event-block"
+                      >
+                        {isNewStep && (
+                          <div className="step-heading">
+                            <span>{step?.label}</span>
+                            <span className="step-line">
+                              <i
+                                style={{
+                                  width: `${Math.min(100, ((stage?.nextGapMs || 0) / stageMax) * 100)}%`,
+                                }}
+                              />
+                            </span>
+                            <span title="Time until the next recorded source step. May include processing, tools, or idle time.">
+                              {stage?.nextGapMs !== undefined
+                                ? `+${ms(stage.nextGapMs)}`
+                                : "—"}
+                            </span>
+                          </div>
+                        )}
+                        <article
+                          className={`event-row type-${e.kind} actor-${e.actor} tool-${e.kind === "tool_call" ? toolCategory(e.name) : "none"} ${selectedId === e.id && !overview ? "selected" : ""} ${hasError ? "has-error" : ""}`}
+                        >
+                          <div className="row-top">
+                            <button
+                              className="row-main"
+                              onClick={() => select(e)}
+                              aria-label={`Read event ${e.idx + 1}: ${nameOf(e)}`}
+                              aria-current={
+                                selectedId === e.id ? "true" : undefined
+                              }
+                            >
+                              <span className={`event-icon kind-${e.kind}`}>
+                                <EventIcon event={e} />
+                              </span>
+                              <span className="row-title">
+                                <strong>
+                                  <Highlight text={nameOf(e)} query={q} />
+                                </strong>
+                                {e.offPath && (
+                                  <span className="event-tag">Alternate</span>
+                                )}
+                                {e.sidechain && (
+                                  <span className="event-tag">Subagent</span>
+                                )}
+                                <span className="row-number">
+                                  {String(e.idx + 1).padStart(2, "0")}
+                                </span>
+                              </span>
+                              <span className="row-preview">
+                                <Highlight text={preview} query={q} />
+                              </span>
+                            </button>
+                            <button
+                              className="row-expand icon-button"
+                              aria-label={`${open ? "Collapse" : "Expand"} event ${e.idx + 1}`}
+                              aria-expanded={open}
+                              onClick={() =>
+                                setOverrides((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(e.id)) next.delete(e.id);
+                                  else next.add(e.id);
+                                  return next;
+                                })
+                              }
+                            >
+                              {open ? (
+                                <ChevronDown size={14} />
+                              ) : (
+                                <ChevronRight size={14} />
+                              )}
+                            </button>
+                          </div>
+                          {open && (
+                            <div className="inline-content">
+                              <Content
+                                text={textOf(e)}
+                                query={q}
+                                markdown={
+                                  e.kind === "message" || e.kind === "thinking"
+                                }
+                                compact
+                              />
+                              {e.kind === "tool_call" &&
+                                (results.get(e.callId || "") || []).map(
+                                  (r, j) => (
+                                    <div key={r.id} className="inline-result">
+                                      <div className="section-label">
+                                        Output{j > 0 ? ` ${j + 1}` : ""}
+                                      </div>
+                                      <Content
+                                        text={textOf(r)}
+                                        query={q}
+                                        compact
+                                      />
+                                    </div>
+                                  ),
+                                )}
+                            </div>
+                          )}
+                        </article>
+                      </div>
+                    );
+                  })}
+                  {!visible.length && (
+                    <div className="no-results">
+                      <Search size={22} />
+                      <p>No matching events</p>
+                      <button
+                        className="text-button"
+                        onClick={() => {
+                          setQuery("");
+                          setFilter("all");
+                        }}
+                      >
+                        Clear filters
+                      </button>
+                    </div>
+                  )}
+                  {visible.length > renderLimit && (
+                    <button
+                      className="show-more"
+                      onClick={() =>
+                        setLimit(Math.max(renderLimit, limit) + 100)
+                      }
+                    >
+                      Show next {Math.min(100, visible.length - renderLimit)}{" "}
+                      events <ArrowDown size={14} />
+                    </button>
+                  )}
+                </div>
+              </section>
+              <div
+                className="split-handle"
+                role="separator"
+                tabIndex={0}
+                aria-label="Resize event reader"
+                aria-orientation="vertical"
+                aria-valuemin={28}
+                aria-valuemax={76}
+                aria-valuenow={Math.round(split)}
+                title="Drag to resize. Drag to the right edge to hide."
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  setResizing(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSplit((n) =>
+                      Math.max(
+                        28,
+                        Math.min(76, n + (e.key === "ArrowRight" ? 4 : -4)),
+                      ),
+                    );
+                  }
+                  if (e.key === "End") {
+                    e.preventDefault();
+                    setReaderHidden(true);
+                  }
+                  if (e.key === "Home") {
+                    e.preventDefault();
+                    setSplit(46);
+                  }
+                }}
+              >
+                <span />
+              </div>
+              <button
+                className="reader-restore"
+                aria-label="Open event reader"
+                title="Open event reader"
+                onClick={() => {
+                  setReaderHidden(false);
+                  setSplit(46);
+                }}
+              >
+                <ChevronLeft size={17} />
+              </button>
+              <section
+                className="reader-column"
+                aria-label="Event reading pane"
+              >
+                <div className="reader-heading">
+                  <button
+                    className="mobile-back icon-button"
+                    aria-label="Back to events"
+                    onClick={() => setMobileReading(false)}
+                  >
+                    <ArrowLeft size={17} />
+                  </button>
+                  <div>
+                    <span className="reader-caption">
+                      {overview
+                        ? "RUN METRICS"
+                        : selected
+                          ? `EVENT ${selected.idx + 1}${selected.step !== undefined ? ` · STEP ${selected.step}` : ""}`
+                          : "DETAILS"}
+                    </span>
+                    <h2>
+                      {overview
+                        ? "Run metrics"
+                        : selected
+                          ? nameOf(selected)
+                          : "Select an event"}
+                    </h2>
+                  </div>
+                  {!overview && selected && (
+                    <div className="event-navigation">
+                      <button
+                        className="icon-button"
+                        aria-label="Previous event"
+                        disabled={position <= 0}
+                        onClick={() => select(visible[position - 1])}
+                      >
+                        <ChevronLeft size={17} />
+                      </button>
+                      <button
+                        className="icon-button"
+                        aria-label="Next event"
+                        disabled={
+                          position < 0 || position >= visible.length - 1
+                        }
+                        onClick={() => select(visible[position + 1])}
+                      >
+                        <ChevronRight size={17} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {!overview && selected && (
+                  <div
+                    className="reader-tabs"
+                    role="tablist"
+                    aria-label="Event details"
+                  >
+                    {(["content", "metrics", "source"] as ReaderTab[]).map(
+                      (t) => (
+                        <button
+                          key={t}
+                          role="tab"
+                          aria-selected={readerTab === t}
+                          className={readerTab === t ? "active" : ""}
+                          onClick={() => setReaderTab(t)}
+                        >
+                          {t === "content"
+                            ? "Content"
+                            : t === "metrics"
+                              ? "Metrics"
+                              : "Source"}
+                        </button>
+                      ),
+                    )}
+                    <span>
+                      {selected.ts && Number.isFinite(Date.parse(selected.ts))
+                        ? new Date(selected.ts).toLocaleTimeString(undefined, {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                          })
+                        : ""}
+                    </span>
+                  </div>
+                )}
+                <div
+                  className="reader-scroll"
+                  ref={readerRef}
+                  key={`${selectedId}-${overview}-${readerTab}`}
+                >
+                  {overview ? (
+                    <>
+                      <div className="reader-section">
+                        <h3>Timing</h3>
+                        <dl className="metric-grid">
+                          <Metric
+                            label="Timestamp span"
+                            value={ms(timing?.durationMs)}
+                            note="First to last recorded timestamp"
+                          />
+                          {timing?.recordedDurationMs !== undefined && (
+                            <Metric
+                              label="Recorded turn time"
+                              value={ms(timing.recordedDurationMs)}
+                              note="Sum of source-reported turn durations"
+                            />
+                          )}
+                          <Metric
+                            label="Time to first token"
+                            value={
+                              timing?.ttftMs?.length
+                                ? `${ms(timing.ttftMs.reduce((a, b) => a + b, 0) / timing.ttftMs.length)} avg`
+                                : "—"
+                            }
+                            note={
+                              timing?.ttftMs?.length
+                                ? `${timing.ttftMs.length} reported measurements`
+                                : "Not recorded in this file"
+                            }
+                          />
+                        </dl>
+                      </div>
+                      <div className="reader-section">
+                        <h3>Tokens</h3>
+                        <dl className="metric-grid">
+                          <Metric
+                            label="Input tokens"
+                            value={fmt(analysis?.inputTokens)}
+                            note={`${totalNote("inputTokens")}${analysis?.inputTokens !== undefined ? " · includes cache" : ""}`}
+                          />
+                          <Metric
+                            label="Output tokens"
+                            value={fmt(analysis?.outputTokens)}
+                            note={totalNote("outputTokens")}
+                          />
+                          <Metric
+                            label="Cache read"
+                            value={fmt(analysis?.cacheReadTokens)}
+                            note={totalNote("cacheReadTokens")}
+                          />
+                          <Metric
+                            label="Cache share of input"
+                            value={
+                              analysis?.cacheReadTokens !== undefined &&
+                              analysis.inputTokens
+                                ? `${((analysis.cacheReadTokens / analysis.inputTokens) * 100).toFixed(1)}%`
+                                : "—"
+                            }
+                          />
+                          <Metric
+                            label="Cache write"
+                            value={fmt(analysis?.cacheWriteTokens)}
+                            note={totalNote("cacheWriteTokens")}
+                          />
+                          <Metric
+                            label="Reasoning tokens"
+                            value={fmt(analysis?.reasoningTokens)}
+                            note={`${totalNote("reasoningTokens")}${analysis?.reasoningTokens !== undefined ? " · included in output" : ""}`}
+                          />
+                          <Metric
+                            label="Cost (USD)"
+                            value={money(analysis?.costUsd)}
+                            note={totalNote("costUsd")}
+                          />
+                        </dl>
+                        {analysis?.inputTokens === undefined && (
+                          <p className="data-note">
+                            No complete input-token total is available in this
+                            file.
+                          </p>
+                        )}
+                        {!!analysis?.incompleteTotals?.length && (
+                          <p className="data-note">
+                            Some request metrics are missing. Incomplete totals
+                            are left unavailable.
+                          </p>
+                        )}
+                      </div>
+                      <div className="reader-section">
+                        <h3>Evaluation</h3>
+                        {analysis?.evaluationMetrics?.length ? (
+                          <dl className="metric-grid">
+                            {analysis.evaluationMetrics.map((metric, i) => (
+                              <Metric
+                                key={i}
+                                label={`Reported ${metric.label}`}
+                                value={String(metric.value)}
+                                note={metric.source}
+                              />
+                            ))}
+                          </dl>
+                        ) : (
+                          <dl className="metric-grid">
+                            <Metric
+                              label="Reward"
+                              value="—"
+                              note="No structured reward field recorded"
+                            />
+                          </dl>
+                        )}
+                      </div>
+                      {!!analysis?.notes.length && (
+                        <div className="reader-section">
+                          <h3>Observations</h3>
+                          {analysis.notes.map((note) => (
+                            <button
+                              key={note.id}
+                              className="observation"
+                              onClick={() => jump(note.eventId)}
+                            >
+                              <span>
+                                {note.title}
+                                <ArrowUpRight size={13} />
+                              </span>
+                              <p>{note.detail}</p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="reader-section">
+                        <h3>Step intervals</h3>
+                        <p className="data-note">
+                          Time to the next recorded step. These intervals can
+                          include reasoning, tools, and idle time; they are not
+                          individual tool durations.
+                        </p>
+                        <div className="stage-table">
+                          {timing?.steps.slice(0, stageLimit).map((step) => (
+                            <button
+                              key={step.key}
+                              onClick={() => jump(step.eventId)}
+                            >
+                              <span>{step.label}</span>
+                              <span className="stage-track">
+                                <i
+                                  style={{
+                                    width: `${Math.min(100, ((step.nextGapMs || 0) / stageMax) * 100)}%`,
+                                  }}
+                                />
+                              </span>
+                              <strong>{ms(step.nextGapMs)}</strong>
+                            </button>
+                          ))}
+                        </div>
+                        {(timing?.steps.length || 0) > stageLimit && (
+                          <button
+                            className="show-more"
+                            onClick={() => setStageLimit((n) => n + 100)}
+                          >
+                            Show next intervals <ArrowDown size={13} />
+                          </button>
+                        )}
+                      </div>
+                      <details className="metadata-source">
+                        <summary>Source metadata</summary>
+                        <Content
+                          text={stringify(
+                            run.session.meta.finalMetrics ??
+                              run.session.meta.totalUsage ??
+                              run.session.meta,
+                          )}
+                        />
+                      </details>
+                      {!!run.session.meta.hiddenReasoningCount && (
+                        <p className="data-note">
+                          {String(run.session.meta.hiddenReasoningCount)}{" "}
+                          reasoning records are not readable in this file.
+                        </p>
+                      )}
+                    </>
+                  ) : selected ? (
+                    readerTab === "source" ? (
+                      <div className="reader-section">
+                        <div className="section-label">
+                          Original event
+                          <Copy text={source} />
+                        </div>
+                        <Content text={source} query={q} />
+                      </div>
+                    ) : readerTab === "metrics" ? (
+                      <>
+                        <div className="reader-section">
+                          <h3>Timing</h3>
+                          <dl className="metric-grid">
+                            <Metric
+                              label="Elapsed in run"
+                              value={ms(pickedTiming?.elapsedMs)}
+                            />
+                            <Metric
+                              label="To next source step"
+                              value={ms(pickedTiming?.nextGapMs)}
+                              note="Timestamp interval, not tool duration"
+                            />
+                            <Metric
+                              label="Recorded duration"
+                              value={ms(pickedTiming?.durationMs)}
+                              note={
+                                pickedTiming?.durationMs === undefined
+                                  ? "Not recorded"
+                                  : "Reported by the source"
+                              }
+                            />
+                            <Metric
+                              label="Time to first token"
+                              value={ms(pickedTiming?.ttftMs)}
+                              note={
+                                pickedTiming?.ttftMs === undefined
+                                  ? "Not recorded"
+                                  : "Reported by the source"
+                              }
+                            />
+                          </dl>
+                        </div>
+                        <div className="reader-section">
+                          <h3>Tokens</h3>
+                          <UsageMetrics
+                            usage={pickedTiming?.usage || selected.usage}
+                          />
+                          {!pickedTiming?.usage && !selected.usage && (
+                            <p className="data-note">
+                              No token usage is attached to this source step.
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {selected.kind === "tool_call" ? (
+                          <>
+                            <div className="reader-section">
+                              <div className="section-label">
+                                Input
+                                <Copy text={stringify(selected.input)} />
+                              </div>
+                              <Content
+                                text={stringify(selected.input)}
+                                query={q}
+                              />
+                            </div>
+                            {related.length ? (
+                              related.map((r, j) => (
+                                <div className="reader-section" key={r.id}>
+                                  <div className="section-label">
+                                    Output
+                                    {related.length > 1 ? ` ${j + 1}` : ""}
+                                    {r.isError && (
+                                      <span className="error-label">
+                                        Error reported
+                                      </span>
+                                    )}
+                                    <Copy text={textOf(r)} />
+                                  </div>
+                                  <Content text={textOf(r)} query={q} />
+                                </div>
+                              ))
+                            ) : (
+                              <p className="data-note">
+                                No matching result was recorded for this call.
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <div className="reader-section">
+                            <div className="section-label">
+                              {selected.kind === "thinking"
+                                ? "Reasoning"
+                                : selected.kind === "message"
+                                  ? "Message"
+                                  : "Content"}
+                              <Copy text={textOf(selected)} />
+                            </div>
+                            <Content
+                              text={textOf(selected)}
+                              query={q}
+                              markdown={
+                                selected.kind === "message" ||
+                                selected.kind === "thinking"
+                              }
+                            />
+                          </div>
+                        )}
+                        {(pickedTiming?.nextGapMs !== undefined ||
+                          pickedTiming?.durationMs !== undefined) && (
+                          <div className="reading-timing">
+                            <Clock3 size={13} />
+                            {pickedTiming.durationMs !== undefined
+                              ? `${ms(pickedTiming.durationMs)} reported duration`
+                              : `${ms(pickedTiming.nextGapMs)} until the next recorded step`}
+                            <button onClick={() => setReaderTab("metrics")}>
+                              Metrics <ArrowRight size={12} />
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )
+                  ) : (
+                    <div className="reader-empty">
+                      Select an event to read its content.
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+          </>
+        )}
+      </main>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".json,.jsonl,.ndjson,.traj,application/json"
+        multiple
+        hidden
+        onChange={(e) => {
+          void importFiles(Array.from(e.target.files || []));
+          e.target.value = "";
+        }}
+      />
+      <dialog
+        ref={modalRef}
+        className="import-dialog"
+        aria-labelledby="import-title"
+        onCancel={(e) => {
+          if (busy) {
+            e.preventDefault();
+            controller.current?.abort();
+          } else setModal(false);
+        }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget && !busy) setModal(false);
+        }}
+      >
+        <div className="dialog-heading">
+          <h2 id="import-title">
+            {mode === "file" ? "Import trajectories" : "Load from URL"}
+          </h2>
+          <button
+            className="icon-button"
+            aria-label="Close import"
+            onClick={() => {
+              controller.current?.abort();
+              setModal(false);
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        {mode === "file" ? (
+          <button
+            className="drop-zone"
+            disabled={busy}
+            onClick={() => fileRef.current?.click()}
+          >
+            {busy ? (
+              <LoaderCircle className="spin" size={24} />
+            ) : (
+              <FileUp size={24} />
+            )}
+            <strong>
+              {busy ? "Importing…" : "Choose files or drop them here"}
+            </strong>
+            <span>JSON, JSONL, NDJSON, .traj · Up to 25 MB each</span>
+          </button>
+        ) : (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void importUrl();
+            }}
+          >
+            <label htmlFor="trajectory-url">Direct file URL</label>
+            <input
+              id="trajectory-url"
+              type="url"
+              value={url}
+              placeholder="https://example.com/trajectory.json"
+              required
+              disabled={busy}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+            <p className="data-note">
+              The source must allow browser requests (CORS). Credentials are not
+              sent.
+            </p>
+            <button className="import-button" disabled={busy || !url}>
+              {busy ? (
+                <LoaderCircle className="spin" size={15} />
+              ) : (
+                <Link2 size={15} />
+              )}{" "}
+              {busy ? "Loading…" : "Load trajectory"}
+            </button>
+          </form>
+        )}
+        {busy && (
+          <button
+            className="text-button cancel-import"
+            onClick={() => controller.current?.abort()}
+          >
+            Cancel import
+          </button>
+        )}
+        {error && (
+          <div className="import-error" role="alert">
+            <XCircle size={16} />
+            <span>{error}</span>
+          </div>
+        )}
+        <p className="import-footnote">
+          Files are processed locally and saved in this browser.
+        </p>
+      </dialog>
+      <dialog
+        ref={deleteRef}
+        className="delete-dialog"
+        aria-labelledby="delete-title"
+        onCancel={() => setRemoveId(null)}
+      >
+        <h2 id="delete-title">Remove trajectory?</h2>
+        <p>
+          The saved browser copy will be deleted. Your original file is
+          unchanged.
+        </p>
+        <div>
+          <button className="quiet-button" onClick={() => setRemoveId(null)}>
+            Cancel
+          </button>
+          <button className="danger-button" onClick={() => void removeRun()}>
+            Remove
+          </button>
+        </div>
+      </dialog>
+      {dragging && (
+        <div
+          className="global-drop"
+          onDragLeave={(e) => {
+            if (e.target === e.currentTarget) setDragging(false);
+          }}
+        >
+          <FileUp size={32} />
+          <span>Drop to import</span>
+        </div>
+      )}
+    </div>
+  );
 }

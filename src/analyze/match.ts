@@ -15,7 +15,8 @@ export interface Folded {
 }
 
 const FINAL_SIGMA = /ς/g;
-const foldSigma = (s: string) => (s.includes('ς') ? s.replace(FINAL_SIGMA, 'σ') : s);
+const foldSigma = (s: string) =>
+  s.includes("ς") ? s.replace(FINAL_SIGMA, "σ") : s;
 
 export function foldQuery(query: string): string {
   return foldSigma(query.toLowerCase());
@@ -26,8 +27,8 @@ export function fold(text: string): Folded {
   // No character gets shorter when lowercased, so equal length means offsets line up one to one.
   if (lower.length === text.length) return { text, lower: foldSigma(lower) };
   const offsets: number[] = [];
-  let out = '';
-  for (let i = 0; i < text.length;) {
+  let out = "";
+  for (let i = 0; i < text.length; ) {
     const cp = text.codePointAt(i)!;
     const size = cp > 0xffff ? 2 : 1;
     const low = foldSigma(String.fromCodePoint(cp).toLowerCase());
@@ -92,7 +93,11 @@ export function firstMatch(f: Folded, query: string): number {
  * `from` / `to` restrict the search to a window of the original text (for clipped views),
  * so highlighting a 40k-character window of a 5 MB output never walks the whole string.
  */
-export function findRanges(f: Folded, query: string, opts: { from?: number; to?: number; limit?: number } = {}): [number, number][] {
+export function findRanges(
+  f: Folded,
+  query: string,
+  opts: { from?: number; to?: number; limit?: number } = {},
+): [number, number][] {
   const q = foldQuery(query);
   const out: [number, number][] = [];
   if (!q) return out;
@@ -109,7 +114,10 @@ export function findRanges(f: Folded, query: string, opts: { from?: number; to?:
     if (start >= to) break;
     pos = i + q.length;
     if (start < lastEnd) continue; // already covered by the previous match's cluster
-    const end = Math.min(clusterEnd(f.text, map ? originalEnd(map, i + q.length) : i + q.length), to);
+    const end = Math.min(
+      clusterEnd(f.text, map ? originalEnd(map, i + q.length) : i + q.length),
+      to,
+    );
     out.push([start, end]);
     lastEnd = end;
   }
@@ -123,11 +131,20 @@ const isLow = (c: number) => c >= 0xdc00 && c <= 0xdfff;
  * it, at most `max` in total, whitespace collapsed, ellipses where it was cut. Never splits
  * a surrogate pair.
  */
-export function excerptAround(text: string, at: number, max = 180, lead = 55): string {
+export function excerptAround(
+  text: string,
+  at: number,
+  max = 180,
+  lead = 55,
+): string {
   const before = Math.min(lead, Math.floor(max / 3)); // a short excerpt must still show the match itself
   let start = at > before ? at - before : 0;
   if (start > 0 && isLow(text.charCodeAt(start))) start--;
   let end = Math.min(text.length, start + max);
   if (end < text.length && isLow(text.charCodeAt(end))) end--;
-  return (start > 0 ? '…' : '') + text.slice(start, end).replace(/\s+/g, ' ') + (end < text.length ? '…' : '');
+  return (
+    (start > 0 ? "…" : "") +
+    text.slice(start, end).replace(/\s+/g, " ") +
+    (end < text.length ? "…" : "")
+  );
 }

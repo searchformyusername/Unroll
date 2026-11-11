@@ -3,7 +3,7 @@ dist/
 .DS_Store
 *.local
 .env*
-!\.env.example
+!.env.example
 # Confidential user data must never be committed.
 trajectories/
 private/

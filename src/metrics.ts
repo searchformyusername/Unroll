@@ -1,4 +1,4 @@
-import type { Session, TraceEvent, Usage } from './parse/types.ts';
+import type { Session, TraceEvent, Usage } from "./parse/types.ts";
 
 /**
  * Timing and usage numbers. Every field is in MILLISECONDS and is either a timestamp
@@ -31,7 +31,7 @@ export interface EventMetrics {
  *  'request'  one Codex model request: output items and tool results up to the usage record that closes it
  *  'event'    a single event (user turns, markers, anything with no reliable group)
  */
-export type Grouping = 'step' | 'response' | 'request' | 'event';
+export type Grouping = "step" | "response" | "request" | "event";
 
 export interface StepTiming extends EventMetrics {
   key: string;
@@ -67,12 +67,25 @@ interface Group {
   start: number; // epoch ms, NaN when the step has no timestamp
 }
 
-const TURN_MARKERS = new Set(['task_complete', 'turn_complete', 'turn_aborted', 'turn_duration']);
+const TURN_MARKERS = new Set([
+  "task_complete",
+  "turn_complete",
+  "turn_aborted",
+  "turn_duration",
+]);
 
 function addUsage(a: Usage | undefined, b: Usage): Usage {
   if (!a) return { ...b };
   const out: Usage = { ...a };
-  for (const k of ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning', 'total', 'costUsd'] as const) {
+  for (const k of [
+    "input",
+    "output",
+    "cacheRead",
+    "cacheWrite",
+    "reasoning",
+    "total",
+    "costUsd",
+  ] as const) {
     const v = b[k];
     if (v !== undefined) out[k] = (out[k] ?? 0) + v;
   }
@@ -83,13 +96,22 @@ const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 function eventLabel(e: TraceEvent): string {
   switch (e.kind) {
-    case 'tool_call': return `${e.name ?? 'Tool'} call`;
-    case 'tool_result': return `${e.name ?? 'Tool'} result`;
-    case 'thinking': return 'Reasoning';
-    case 'usage': return 'Token usage';
-    case 'meta': return e.name ? cap(e.name.replace(/[_-]+/g, ' ')) : 'Marker';
-    case 'message': return e.actor === 'system' && e.name ? e.name : `${cap(e.actor)} message`;
-    default: return 'Unrecognized event';
+    case "tool_call":
+      return `${e.name ?? "Tool"} call`;
+    case "tool_result":
+      return `${e.name ?? "Tool"} result`;
+    case "thinking":
+      return "Reasoning";
+    case "usage":
+      return "Token usage";
+    case "meta":
+      return e.name ? cap(e.name.replace(/[_-]+/g, " ")) : "Marker";
+    case "message":
+      return e.actor === "system" && e.name
+        ? e.name
+        : `${cap(e.actor)} message`;
+    default:
+      return "Unrecognized event";
   }
 }
 
@@ -101,8 +123,8 @@ function eventLabel(e: TraceEvent): string {
 export function buildMetrics(session: Session): Metrics {
   const events = session.events;
   const n = events.length;
-  const codex = session.format === 'codex';
-  const stepWord = session.format === 'chat' ? 'Message' : 'Step';
+  const codex = session.format === "codex";
+  const stepWord = session.format === "chat" ? "Message" : "Step";
 
   // ---- timestamps, parsed once
   const ts = new Float64Array(n);
@@ -129,8 +151,8 @@ export function buildMetrics(session: Session): Metrics {
   for (let i = 0; i < n; i++) {
     const e = events[i];
     if (e.callId !== undefined) {
-      if (e.kind === 'tool_call') callEvent.set(e.callId, e);
-      else if (e.kind === 'tool_result') {
+      if (e.kind === "tool_call") callEvent.set(e.callId, e);
+      else if (e.kind === "tool_result") {
         const list = results.get(e.callId);
         if (list) list.push(e);
         else results.set(e.callId, [e]);
@@ -140,29 +162,39 @@ export function buildMetrics(session: Session): Metrics {
 
     let key: string;
     let grouping: Grouping;
-    const viaCall = e.kind === 'tool_result' && e.callId !== undefined ? callGroup.get(e.callId) : undefined;
+    const viaCall =
+      e.kind === "tool_result" && e.callId !== undefined
+        ? callGroup.get(e.callId)
+        : undefined;
     if (e.step !== undefined) {
       key = `s:${e.step}`;
-      grouping = 'step';
+      grouping = "step";
     } else if (e.responseId !== undefined) {
       key = `r:${e.responseId}`;
-      grouping = 'response';
+      grouping = "response";
     } else if (viaCall) {
       key = viaCall.key;
       grouping = viaCall.grouping;
-    } else if (codex && (e.actor === 'assistant' || e.actor === 'tool' || e.kind === 'usage')) {
+    } else if (
+      codex &&
+      (e.actor === "assistant" || e.actor === "tool" || e.kind === "usage")
+    ) {
       key = `q:${request}`;
-      grouping = 'request';
+      grouping = "request";
       requestOpen = true;
     } else {
       key = `e:${e.id}`;
-      grouping = 'event';
+      grouping = "event";
     }
     if (codex) {
       // A usage record closes the request it follows. A new human turn or a turn marker also
       // closes it, so output from different turns can never merge into one step.
-      const closes = e.kind === 'usage' && grouping === 'request'
-        || requestOpen && grouping === 'event' && ((e.actor === 'user' && e.kind === 'message') || (e.kind === 'meta' && TURN_MARKERS.has(e.name ?? '')));
+      const closes =
+        (e.kind === "usage" && grouping === "request") ||
+        (requestOpen &&
+          grouping === "event" &&
+          ((e.actor === "user" && e.kind === "message") ||
+            (e.kind === "meta" && TURN_MARKERS.has(e.name ?? ""))));
       if (closes) {
         request++;
         requestOpen = false;
@@ -176,7 +208,8 @@ export function buildMetrics(session: Session): Metrics {
     g.events.push(e);
     if (Number.isNaN(g.start) && !Number.isNaN(ts[i])) g.start = ts[i];
     groupOf[i] = g;
-    if (e.kind === 'tool_call' && e.callId !== undefined) callGroup.set(e.callId, g);
+    if (e.kind === "tool_call" && e.callId !== undefined)
+      callGroup.set(e.callId, g);
   }
 
   // ---- steps
@@ -195,18 +228,36 @@ export function buildMetrics(session: Session): Metrics {
     let scoped: TraceEvent | undefined; // a step-level record that carries recorded timing
     for (const e of ev) {
       if (e.usage) usage = addUsage(usage, e.usage);
-      if (e.kind === 'usage') {
+      if (e.kind === "usage") {
         if (e.durationMs !== undefined || e.ttftMs !== undefined) scoped = e;
         continue;
       }
-      if (!anchor && !(e.kind === 'tool_result' && e.callId !== undefined && callEvent.has(e.callId))) anchor = e;
+      if (
+        !anchor &&
+        !(
+          e.kind === "tool_result" &&
+          e.callId !== undefined &&
+          callEvent.has(e.callId)
+        )
+      )
+        anchor = e;
     }
     anchor ??= ev[0];
-    const label = g.grouping === 'step' ? `${stepWord} ${ev[0].step}`
-      : g.grouping === 'response' ? `Response ${++responses}`
-      : g.grouping === 'request' ? `Request ${++requests}`
-      : eventLabel(ev[0]);
-    const step: StepTiming = { key: g.key, label, eventId: anchor.id, grouping: g.grouping, eventCount: ev.length };
+    const label =
+      g.grouping === "step"
+        ? `${stepWord} ${ev[0].step}`
+        : g.grouping === "response"
+          ? `Response ${++responses}`
+          : g.grouping === "request"
+            ? `Request ${++requests}`
+            : eventLabel(ev[0]);
+    const step: StepTiming = {
+      key: g.key,
+      label,
+      eventId: anchor.id,
+      grouping: g.grouping,
+      eventCount: ev.length,
+    };
     if (!Number.isNaN(g.start)) {
       step.startMs = g.start;
       step.elapsedMs = g.start - first;
@@ -214,10 +265,12 @@ export function buildMetrics(session: Session): Metrics {
     // A step gets a duration or TTFT only from a record scoped to the whole step, or when the step IS
     // a single event. One event's duration never stands in for a multi-event step, and durations of
     // several events (parallel tools, reasoning plus tools) are never added up.
-    const source = scoped ?? (g.grouping === 'event' && ev.length === 1 ? ev[0] : undefined);
+    const source =
+      scoped ?? (g.grouping === "event" && ev.length === 1 ? ev[0] : undefined);
     if (source?.durationMs !== undefined) {
       step.durationMs = source.durationMs;
-      if (maxDuration === undefined || source.durationMs > maxDuration) maxDuration = source.durationMs;
+      if (maxDuration === undefined || source.durationMs > maxDuration)
+        maxDuration = source.durationMs;
     }
     if (source?.ttftMs !== undefined) step.ttftMs = source.ttftMs;
     if (usage) step.usage = usage;
@@ -225,7 +278,8 @@ export function buildMetrics(session: Session): Metrics {
     if (!g.side && step.startMs !== undefined) {
       if (prevMain && step.startMs >= prevMain.startMs!) {
         prevMain.nextGapMs = step.startMs - prevMain.startMs!;
-        if (maxGap === undefined || prevMain.nextGapMs > maxGap) maxGap = prevMain.nextGapMs;
+        if (maxGap === undefined || prevMain.nextGapMs > maxGap)
+          maxGap = prevMain.nextGapMs;
       }
       prevMain = step;
     }
@@ -249,10 +303,11 @@ export function buildMetrics(session: Session): Metrics {
     }
     if (step?.nextGapMs !== undefined) m.nextGapMs = step.nextGapMs;
     if (e.durationMs !== undefined) m.durationMs = e.durationMs;
-    else if (e.kind === 'tool_call' && e.callId !== undefined) {
+    else if (e.kind === "tool_call" && e.callId !== undefined) {
       // A call shows the run time its own (single) result recorded.
       const list = results.get(e.callId);
-      if (list?.length === 1 && list[0].durationMs !== undefined) m.durationMs = list[0].durationMs;
+      if (list?.length === 1 && list[0].durationMs !== undefined)
+        m.durationMs = list[0].durationMs;
     }
     const t = e.ttftMs ?? step?.ttftMs;
     if (t !== undefined) m.ttftMs = t;
@@ -261,7 +316,12 @@ export function buildMetrics(session: Session): Metrics {
     byEvent.set(e.id, m);
 
     if (e.ttftMs !== undefined) ttft.push(e.ttftMs);
-    if (e.kind === 'meta' && e.durationMs !== undefined && TURN_MARKERS.has(e.name ?? '')) recorded = (recorded ?? 0) + e.durationMs;
+    if (
+      e.kind === "meta" &&
+      e.durationMs !== undefined &&
+      TURN_MARKERS.has(e.name ?? "")
+    )
+      recorded = (recorded ?? 0) + e.durationMs;
   }
 
   const out: Metrics = { steps, byEvent };

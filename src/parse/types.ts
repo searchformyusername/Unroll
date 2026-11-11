@@ -3,16 +3,16 @@
  * structured-clone-safe (no Maps, Sets, class instances, functions).
  */
 
-export type Actor = 'user' | 'assistant' | 'tool' | 'system';
+export type Actor = "user" | "assistant" | "tool" | "system";
 
 export type EventKind =
-  | 'message'
-  | 'thinking'
-  | 'tool_call'
-  | 'tool_result'
-  | 'usage'
-  | 'meta'
-  | 'unknown';
+  | "message"
+  | "thinking"
+  | "tool_call"
+  | "tool_result"
+  | "usage"
+  | "meta"
+  | "unknown";
 
 /**
  * Token usage, normalized across providers.
@@ -24,9 +24,23 @@ export interface Usage {
   output?: number;
   cacheRead?: number;
   cacheWrite?: number;
+  /** Reasoning tokens. A subset of `output`, never added on top. */
   reasoning?: number;
   total?: number;
+  /** Cost in US dollars, only when the source recorded one. Never computed from token counts. */
   costUsd?: number;
+}
+
+/**
+ * An evaluation result the source states in a structured, explicitly named field
+ * (`reward` or `score`) at a known location. Never read from message text or tool output.
+ */
+export interface EvaluationMetric {
+  /** The field name exactly as written in the source. */
+  label: string;
+  value: number | boolean;
+  /** JSON path of the field, e.g. "$.final_metrics.reward". */
+  source: string;
 }
 
 export interface TraceEvent {
@@ -91,6 +105,9 @@ export interface SessionMeta {
   model?: string;
   startedAt?: string;
   endedAt?: string;
+  /** Session totals the source reports itself (ATIF final_metrics). */
+  totalUsage?: Usage;
+  evaluationMetrics?: EvaluationMetric[];
   [key: string]: unknown;
 }
 
@@ -107,4 +124,8 @@ export interface ParseResult {
   diagnostics: Diag[];
 }
 
-export type ParseErrorCode = 'empty' | 'not_json' | 'unknown_format' | 'no_events';
+export type ParseErrorCode =
+  | "empty"
+  | "not_json"
+  | "unknown_format"
+  | "no_events";

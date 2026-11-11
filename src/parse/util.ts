@@ -1,6 +1,14 @@
 import type {
-  Actor, Diag, EventKind, ParseErrorCode, ParseResult, SessionMeta, TraceEvent, Usage,
-} from './types.ts';
+  Actor,
+  Diag,
+  EvaluationMetric,
+  EventKind,
+  ParseErrorCode,
+  ParseResult,
+  SessionMeta,
+  TraceEvent,
+  Usage,
+} from "./types.ts";
 
 export type Rec = Record<string, unknown>;
 
@@ -14,23 +22,30 @@ export class ParseError extends Error {
   code: ParseErrorCode;
   constructor(code: ParseErrorCode, message: string) {
     super(message);
-    this.name = 'ParseError';
+    this.name = "ParseError";
     this.code = code;
   }
 }
 
 export const isObj = (v: unknown): v is Rec =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-export const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+  typeof v === "object" && v !== null && !Array.isArray(v);
+export const str = (v: unknown): string | undefined =>
+  typeof v === "string" ? v : undefined;
 export const num = (v: unknown): number | undefined =>
-  typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+  typeof v === "number" && Number.isFinite(v) ? v : undefined;
 /** String or number as a string id. */
 export const idOf = (v: unknown): string | undefined =>
-  typeof v === 'string' ? (v.length ? v : undefined) : typeof v === 'number' ? String(v) : undefined;
+  typeof v === "string"
+    ? v.length
+      ? v
+      : undefined
+    : typeof v === "number"
+      ? String(v)
+      : undefined;
 
 export function toIso(v: unknown): string | undefined {
-  if (typeof v === 'string') return v.length ? v : undefined;
-  if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+  if (typeof v === "string") return v.length ? v : undefined;
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) {
     const d = new Date(v < 1e12 ? v * 1000 : v); // seconds vs milliseconds
     return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
   }
@@ -39,7 +54,7 @@ export function toIso(v: unknown): string | undefined {
 
 /** JSON-string tool arguments become objects; anything else is returned untouched. */
 export function parseArgs(v: unknown): unknown {
-  if (typeof v !== 'string') return v;
+  if (typeof v !== "string") return v;
   const c = v.charCodeAt(0);
   if (c !== 123 && c !== 91) return v; // not '{' or '['
   try {
@@ -49,48 +64,61 @@ export function parseArgs(v: unknown): unknown {
   }
 }
 
-const TEXT_PART = new Set(['text', 'input_text', 'output_text', 'summary_text', 'reasoning_text']);
+const TEXT_PART = new Set([
+  "text",
+  "input_text",
+  "output_text",
+  "summary_text",
+  "reasoning_text",
+]);
 
 /** Readable text of one content part, or undefined if the part is not text-like. */
 export function partText(p: unknown): string | undefined {
-  if (typeof p === 'string') return p;
+  if (typeof p === "string") return p;
   if (!isObj(p)) return undefined;
   const t = p.type;
-  if (typeof t !== 'string') return typeof p.text === 'string' ? p.text : undefined;
-  if (TEXT_PART.has(t)) return typeof p.text === 'string' ? p.text : '';
-  if (t === 'refusal') return str(p.refusal) ?? '';
-  if (t === 'image' || t === 'image_url' || t === 'input_image') return '[image]';
-  if (t === 'document' || t === 'file' || t === 'input_file') return '[file]';
+  if (typeof t !== "string")
+    return typeof p.text === "string" ? p.text : undefined;
+  if (TEXT_PART.has(t)) return typeof p.text === "string" ? p.text : "";
+  if (t === "refusal") return str(p.refusal) ?? "";
+  if (t === "image" || t === "image_url" || t === "input_image")
+    return "[image]";
+  if (t === "document" || t === "file" || t === "input_file") return "[file]";
   return undefined;
 }
 
 /** Flatten message content (string | part[] | part) into readable text. */
 export function contentText(content: unknown): string {
-  if (typeof content === 'string') return content;
+  if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    let out = '';
+    let out = "";
     for (const p of content) {
       const t = partText(p);
-      if (t) out = out ? out + '\n\n' + t : t;
+      if (t) out = out ? out + "\n\n" + t : t;
     }
     return out;
   }
-  return partText(content) ?? '';
+  return partText(content) ?? "";
 }
 
 /** Tool output: a string when every part is text, otherwise the source value untouched. */
 export function toolOutput(content: unknown): unknown {
   if (!Array.isArray(content)) return content;
-  let out = '';
+  let out = "";
   for (const p of content) {
-    if (typeof p === 'string') {
-      out = out ? out + '\n' + p : p;
+    if (typeof p === "string") {
+      out = out ? out + "\n" + p : p;
       continue;
     }
-    if (!isObj(p) || typeof p.type !== 'string' || !TEXT_PART.has(p.type) || typeof p.text !== 'string') {
+    if (
+      !isObj(p) ||
+      typeof p.type !== "string" ||
+      !TEXT_PART.has(p.type) ||
+      typeof p.text !== "string"
+    ) {
       return content;
     }
-    out = out ? out + '\n' + p.text : p.text;
+    out = out ? out + "\n" + p.text : p.text;
   }
   return out;
 }
@@ -99,10 +127,26 @@ export function toolOutput(content: unknown): unknown {
 export function usageFrom(u: unknown): Usage | undefined {
   if (!isObj(u)) return undefined;
   const out: Usage = {};
-  const inDetails = isObj(u.input_tokens_details) ? u.input_tokens_details
-    : isObj(u.prompt_tokens_details) ? u.prompt_tokens_details : undefined;
-  const outDetails = isObj(u.output_tokens_details) ? u.output_tokens_details
-    : isObj(u.completion_tokens_details) ? u.completion_tokens_details : undefined;
+  // Detail objects sit at the top level (OpenAI) or under `extra` (ATIF step metrics).
+  const extra = isObj(u.extra) ? u.extra : undefined;
+  const inDetails = isObj(u.input_tokens_details)
+    ? u.input_tokens_details
+    : isObj(u.prompt_tokens_details)
+      ? u.prompt_tokens_details
+      : isObj(extra?.prompt_tokens_details)
+        ? extra.prompt_tokens_details
+        : isObj(extra?.input_tokens_details)
+          ? extra.input_tokens_details
+          : undefined;
+  const outDetails = isObj(u.output_tokens_details)
+    ? u.output_tokens_details
+    : isObj(u.completion_tokens_details)
+      ? u.completion_tokens_details
+      : isObj(extra?.completion_tokens_details)
+        ? extra.completion_tokens_details
+        : isObj(extra?.output_tokens_details)
+          ? extra.output_tokens_details
+          : undefined;
 
   const inTok = num(u.input_tokens);
   const addRead = num(u.cache_read_input_tokens);
@@ -117,12 +161,24 @@ export function usageFrom(u: unknown): Usage | undefined {
     cacheWrite = addWrite;
   } else {
     input = inTok ?? num(u.prompt_tokens);
-    cacheRead = num(u.cached_input_tokens) ?? num(u.cached_tokens) ?? num(inDetails?.cached_tokens);
-    cacheWrite = num(u.cache_write_input_tokens);
+    cacheRead =
+      num(u.cached_input_tokens) ??
+      num(u.cached_tokens) ??
+      num(inDetails?.cached_tokens);
+    cacheWrite =
+      num(u.cache_write_input_tokens) ??
+      num(u.cache_write_tokens) ??
+      num(inDetails?.cache_write_tokens) ??
+      num(inDetails?.cache_creation_tokens);
   }
   const output = num(u.output_tokens) ?? num(u.completion_tokens);
-  const reasoning = num(u.reasoning_output_tokens) ?? num(outDetails?.reasoning_tokens);
-  const total = num(u.total_tokens) ?? (input !== undefined && output !== undefined ? input + output : undefined);
+  const reasoning =
+    num(u.reasoning_output_tokens) ??
+    num(u.reasoning_tokens) ??
+    num(outDetails?.reasoning_tokens);
+  const total =
+    num(u.total_tokens) ??
+    (input !== undefined && output !== undefined ? input + output : undefined);
   const costUsd = num(u.cost_usd) ?? num(u.cost);
 
   if (input !== undefined) out.input = input;
@@ -136,7 +192,62 @@ export function usageFrom(u: unknown): Usage | undefined {
   return undefined;
 }
 
-const fmt = (n: number) => n.toLocaleString('en-US');
+/**
+ * Session totals from an ATIF `final_metrics` object, exactly as the source reports them.
+ * Some producers put the less common totals under `final_metrics.extra`.
+ */
+export function finalMetricsUsage(f: unknown): Usage | undefined {
+  if (!isObj(f)) return undefined;
+  const fx = isObj(f.extra) ? f.extra : {};
+  return usageFrom({
+    prompt_tokens: f.total_prompt_tokens,
+    completion_tokens: f.total_completion_tokens,
+    cached_tokens: f.total_cached_tokens,
+    cost_usd: f.total_cost_usd,
+    reasoning_tokens: f.total_reasoning_tokens ?? fx.total_reasoning_tokens,
+    cache_write_tokens:
+      f.total_cache_write_tokens ?? fx.total_cache_write_tokens,
+  });
+}
+
+/** Where an evaluation result may be read from, and under which exact field names. Nothing else is trusted. */
+const EVALUATION_PATHS: string[][] = [
+  [],
+  ["evaluation"],
+  ["final_metrics"],
+  ["final_metrics", "extra"],
+  ["extra"],
+  ["extra", "evaluation"],
+];
+const EVALUATION_KEYS = ["reward", "score"];
+
+/**
+ * Evaluation results stated in explicitly named structured fields of the document root:
+ * `reward` / `score` directly under $, $.evaluation, $.final_metrics, $.final_metrics.extra,
+ * $.extra or $.extra.evaluation, holding a finite number or a boolean. Zero and false are
+ * results and are kept. Strings, nested objects, message text and tool output are never read.
+ */
+export function evaluationMetrics(doc: Rec): EvaluationMetric[] {
+  const out: EvaluationMetric[] = [];
+  for (const path of EVALUATION_PATHS) {
+    let node: unknown = doc;
+    for (const key of path) node = isObj(node) ? node[key] : undefined;
+    if (!isObj(node)) continue;
+    for (const label of EVALUATION_KEYS) {
+      if (!Object.prototype.hasOwnProperty.call(node, label)) continue;
+      const value = node[label];
+      if (
+        typeof value === "boolean" ||
+        (typeof value === "number" && Number.isFinite(value))
+      ) {
+        out.push({ label, value, source: ["$", ...path, label].join(".") });
+      }
+    }
+  }
+  return out;
+}
+
+const fmt = (n: number) => n.toLocaleString("en-US");
 
 export function usageText(u: Usage): string {
   const parts: string[] = [];
@@ -145,16 +256,41 @@ export function usageText(u: Usage): string {
   if (u.cacheRead) parts.push(`${fmt(u.cacheRead)} cached`);
   if (u.reasoning) parts.push(`${fmt(u.reasoning)} reasoning`);
   if (u.costUsd !== undefined) parts.push(`$${u.costUsd.toFixed(4)}`);
-  return parts.join(' · ');
+  return parts.join(" · ");
 }
 
-const MS_KEYS = ['duration_ms', 'durationMs', 'latency_ms', 'elapsed_ms', 'wall_time_ms'];
-const SEC_KEYS = ['duration_seconds', 'duration_sec', 'duration_s', 'wall_time_seconds'];
-const TTFT_MS_KEYS = ['time_to_first_token_ms', 'ttft_ms', 'ttftMs', 'first_token_ms'];
-const TTFT_SEC_KEYS = ['time_to_first_token_seconds', 'time_to_first_token_s', 'ttft_seconds', 'ttft_s'];
-const nonNeg = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+const MS_KEYS = [
+  "duration_ms",
+  "durationMs",
+  "latency_ms",
+  "elapsed_ms",
+  "wall_time_ms",
+];
+const SEC_KEYS = [
+  "duration_seconds",
+  "duration_sec",
+  "duration_s",
+  "wall_time_seconds",
+];
+const TTFT_MS_KEYS = [
+  "time_to_first_token_ms",
+  "ttft_ms",
+  "ttftMs",
+  "first_token_ms",
+];
+const TTFT_SEC_KEYS = [
+  "time_to_first_token_seconds",
+  "time_to_first_token_s",
+  "ttft_seconds",
+  "ttft_s",
+];
+const nonNeg = (v: unknown): number | undefined =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
 
-export interface Timing { durationMs?: number; ttftMs?: number }
+export interface Timing {
+  durationMs?: number;
+  ttftMs?: number;
+}
 
 /**
  * Explicitly recorded timing fields, normalized to milliseconds. Only keys whose name states
@@ -164,16 +300,40 @@ export interface Timing { durationMs?: number; ttftMs?: number }
 export function timingFrom(o: unknown, into: Timing = {}): Timing {
   if (!isObj(o)) return into;
   if (into.durationMs === undefined) {
-    for (const k of MS_KEYS) { const v = nonNeg(o[k]); if (v !== undefined) { into.durationMs = v; break; } }
+    for (const k of MS_KEYS) {
+      const v = nonNeg(o[k]);
+      if (v !== undefined) {
+        into.durationMs = v;
+        break;
+      }
+    }
   }
   if (into.durationMs === undefined) {
-    for (const k of SEC_KEYS) { const v = nonNeg(o[k]); if (v !== undefined) { into.durationMs = Math.round(v * 1000); break; } }
+    for (const k of SEC_KEYS) {
+      const v = nonNeg(o[k]);
+      if (v !== undefined) {
+        into.durationMs = Math.round(v * 1000);
+        break;
+      }
+    }
   }
   if (into.ttftMs === undefined) {
-    for (const k of TTFT_MS_KEYS) { const v = nonNeg(o[k]); if (v !== undefined) { into.ttftMs = v; break; } }
+    for (const k of TTFT_MS_KEYS) {
+      const v = nonNeg(o[k]);
+      if (v !== undefined) {
+        into.ttftMs = v;
+        break;
+      }
+    }
   }
   if (into.ttftMs === undefined) {
-    for (const k of TTFT_SEC_KEYS) { const v = nonNeg(o[k]); if (v !== undefined) { into.ttftMs = Math.round(v * 1000); break; } }
+    for (const k of TTFT_SEC_KEYS) {
+      const v = nonNeg(o[k]);
+      if (v !== undefined) {
+        into.ttftMs = Math.round(v * 1000);
+        break;
+      }
+    }
   }
   return into;
 }
@@ -181,18 +341,21 @@ export function timingFrom(o: unknown, into: Timing = {}): Timing {
 /** Compact duration for marker text: 850ms, 4.2s, 3m 5s, 2h 4m. */
 export function spanText(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1).replace(/\.0$/, '')}s`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1).replace(/\.0$/, "")}s`;
   const s = Math.round(ms / 1000);
   const m = Math.floor(s / 60);
   if (m < 60) return s % 60 ? `${m}m ${s % 60}s` : `${m}m`;
-  return m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`;
+  return m % 60
+    ? `${Math.floor(m / 60)}h ${m % 60}m`
+    : `${Math.floor(m / 60)}h`;
 }
 
 export function timingText(t: Timing): string {
   const parts: string[] = [];
   if (t.durationMs !== undefined) parts.push(`took ${spanText(t.durationMs)}`);
-  if (t.ttftMs !== undefined) parts.push(`first token after ${spanText(t.ttftMs)}`);
-  return parts.join(' · ');
+  if (t.ttftMs !== undefined)
+    parts.push(`first token after ${spanText(t.ttftMs)}`);
+  return parts.join(" · ");
 }
 
 export interface NewEvent {
@@ -231,7 +394,12 @@ export class Builder {
       id = `${e.id}~${n}`;
     }
     this.ids.add(id);
-    const ev: TraceEvent = { idx: this.events.length, id, actor: e.actor, kind: e.kind };
+    const ev: TraceEvent = {
+      idx: this.events.length,
+      id,
+      actor: e.actor,
+      kind: e.kind,
+    };
     if (e.ts !== undefined) ev.ts = e.ts;
     if (e.text !== undefined) ev.text = e.text;
     if (e.callId !== undefined) ev.callId = e.callId;
@@ -271,7 +439,7 @@ export class Builder {
     for (const e of this.events) {
       const id = e.callId;
       if (id === undefined) continue;
-      if (e.kind === 'tool_call') {
+      if (e.kind === "tool_call") {
         const n = (seen.get(id) ?? 0) + 1;
         seen.set(id, n);
         if (n > 1) {
@@ -282,7 +450,7 @@ export class Builder {
         const q = pending.get(id);
         if (q) q.push(e);
         else pending.set(id, [e]);
-      } else if (e.kind === 'tool_result') {
+      } else if (e.kind === "tool_result") {
         const call = pending.get(id)?.shift() ?? latest.get(id);
         if (!call) {
           orphans++;
@@ -292,13 +460,26 @@ export class Builder {
         if (e.name === undefined && call.name !== undefined) e.name = call.name;
       }
     }
-    if (renamed) this.diag(`${renamed} tool call id(s) were reused by the source; later uses were renamed (id#2, id#3…) so calls and results pair correctly.`);
-    if (orphans) this.diag(`${orphans} tool result(s) reference a tool call that is not in this file.`);
+    if (renamed)
+      this.diag(
+        `${renamed} tool call id(s) were reused by the source; later uses were renamed (id#2, id#3…) so calls and results pair correctly.`,
+      );
+    if (orphans)
+      this.diag(
+        `${orphans} tool result(s) reference a tool call that is not in this file.`,
+      );
   }
 
-  finish(format: string, id: string | undefined, meta: SessionMeta): ParseResult {
+  finish(
+    format: string,
+    id: string | undefined,
+    meta: SessionMeta,
+  ): ParseResult {
     if (this.events.length === 0) {
-      throw new ParseError('no_events', `This file was recognized as ${format}, but it contains no conversation events to show. It may be empty, metadata-only, or cut off before the first message.`);
+      throw new ParseError(
+        "no_events",
+        `This file was recognized as ${format}, but it contains no conversation events to show. It may be empty, metadata-only, or cut off before the first message.`,
+      );
     }
     this.linkCalls();
     let min = Infinity;
@@ -309,15 +490,25 @@ export class Builder {
       if (e.ts === undefined) continue;
       const t = Date.parse(e.ts);
       if (Number.isNaN(t)) continue;
-      if (t < min) { min = t; minS = e.ts; }
-      if (t > max) { max = t; maxS = e.ts; }
+      if (t < min) {
+        min = t;
+        minS = e.ts;
+      }
+      if (t > max) {
+        max = t;
+        maxS = e.ts;
+      }
     }
-    if (minS !== undefined && meta.startedAt === undefined) meta.startedAt = minS;
+    if (minS !== undefined && meta.startedAt === undefined)
+      meta.startedAt = minS;
     if (maxS !== undefined && meta.endedAt === undefined) meta.endedAt = maxS;
-    if (this.dropped) this.diagnostics.push({ reason: `${this.dropped} more diagnostics were omitted.` });
+    if (this.dropped)
+      this.diagnostics.push({
+        reason: `${this.dropped} more diagnostics were omitted.`,
+      });
     return {
       format,
-      session: { id: id ?? 'session', format, meta, events: this.events },
+      session: { id: id ?? "session", format, meta, events: this.events },
       diagnostics: this.diagnostics,
     };
   }

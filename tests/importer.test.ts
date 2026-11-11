@@ -1,11 +1,105 @@
-import {afterEach,describe,expect,it,vi} from 'vitest';
-import {fetchText,MAX_BYTES} from '../src/importer';
-afterEach(()=>vi.unstubAllGlobals());
-describe('direct URL imports',()=>{
- it('rejects non-HTTP URLs and credentials before sending a request',async()=>{const fetch=vi.fn();vi.stubGlobal('fetch',fetch);for(const url of ['file:///private/data','https://name:secret@example.com/a','javascript:alert(1)','not a url'])await expect(fetchText(url,new AbortController().signal)).rejects.toThrow();expect(fetch).not.toHaveBeenCalled();});
- it('omits cookies and referrers and handles split UTF-8 characters',async()=>{const bytes=new TextEncoder().encode('{"text":"café 🧠"}');const fetch=vi.fn().mockResolvedValue(new Response(new ReadableStream({start(c){c.enqueue(bytes.slice(0,11));c.enqueue(bytes.slice(11,16));c.enqueue(bytes.slice(16));c.close();}})));vi.stubGlobal('fetch',fetch);const signal=new AbortController().signal;const result=await fetchText('https://example.com/trace.json?token=private',signal);expect(result).toEqual({text:'{"text":"café 🧠"}',bytes:bytes.byteLength,name:'trace.json'});expect(fetch).toHaveBeenCalledWith(new URL('https://example.com/trace.json?token=private'),{signal,credentials:'omit',referrerPolicy:'no-referrer'});});
- it('reports HTTP failures and CORS/network failures honestly',async()=>{vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response('',{status:403})));await expect(fetchText('https://example.com/x',new AbortController().signal)).rejects.toThrow('HTTP 403');vi.stubGlobal('fetch',vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));await expect(fetchText('https://example.com/x',new AbortController().signal)).rejects.toThrow('CORS');});
- it('rejects an advertised oversized response before reading it',async()=>{vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response('tiny',{headers:{'content-length':String(MAX_BYTES+1)}})));await expect(fetchText('https://example.com/x',new AbortController().signal)).rejects.toThrow('25 MB');});
- it('enforces the real streamed size when the source omits content-length',async()=>{let cancelled=false;const stream=new ReadableStream({start(c){c.enqueue(new Uint8Array(MAX_BYTES+1));},cancel(){cancelled=true;}});vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(stream)));await expect(fetchText('https://example.com/x',new AbortController().signal)).rejects.toThrow('25 MB');expect(cancelled).toBe(true);});
- it('preserves aborts so the UI can distinguish cancellation',async()=>{const c=new AbortController();c.abort();vi.stubGlobal('fetch',vi.fn().mockRejectedValue(new DOMException('cancelled','AbortError')));await expect(fetchText('https://example.com/x',c.signal)).rejects.toMatchObject({name:'AbortError'});});
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchText, MAX_BYTES } from "../src/importer";
+afterEach(() => vi.unstubAllGlobals());
+describe("direct URL imports", () => {
+  it("rejects non-HTTP URLs and credentials before sending a request", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    for (const url of [
+      "file:///private/data",
+      "https://name:secret@example.com/a",
+      "javascript:alert(1)",
+      "not a url",
+    ])
+      await expect(
+        fetchText(url, new AbortController().signal),
+      ).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("omits cookies and referrers and handles split UTF-8 characters", async () => {
+    const bytes = new TextEncoder().encode('{"text":"café 🧠"}');
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(bytes.slice(0, 11));
+            c.enqueue(bytes.slice(11, 16));
+            c.enqueue(bytes.slice(16));
+            c.close();
+          },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const signal = new AbortController().signal;
+    const result = await fetchText(
+      "https://example.com/trace.json?token=private",
+      signal,
+    );
+    expect(result).toEqual({
+      text: '{"text":"café 🧠"}',
+      bytes: bytes.byteLength,
+      name: "trace.json",
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("https://example.com/trace.json?token=private"),
+      { signal, credentials: "omit", referrerPolicy: "no-referrer" },
+    );
+  });
+  it("reports HTTP failures and CORS/network failures honestly", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("", { status: 403 })),
+    );
+    await expect(
+      fetchText("https://example.com/x", new AbortController().signal),
+    ).rejects.toThrow("HTTP 403");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new TypeError("Failed to fetch")),
+    );
+    await expect(
+      fetchText("https://example.com/x", new AbortController().signal),
+    ).rejects.toThrow("CORS");
+  });
+  it("rejects an advertised oversized response before reading it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("tiny", {
+          headers: { "content-length": String(MAX_BYTES + 1) },
+        }),
+      ),
+    );
+    await expect(
+      fetchText("https://example.com/x", new AbortController().signal),
+    ).rejects.toThrow("25 MB");
+  });
+  it("enforces the real streamed size when the source omits content-length", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream({
+      start(c) {
+        c.enqueue(new Uint8Array(MAX_BYTES + 1));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(stream)));
+    await expect(
+      fetchText("https://example.com/x", new AbortController().signal),
+    ).rejects.toThrow("25 MB");
+    expect(cancelled).toBe(true);
+  });
+  it("preserves aborts so the UI can distinguish cancellation", async () => {
+    const c = new AbortController();
+    c.abort();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new DOMException("cancelled", "AbortError")),
+    );
+    await expect(
+      fetchText("https://example.com/x", c.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
 });
