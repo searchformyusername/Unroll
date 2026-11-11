@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { anchoredScrollTop, nextEventBatch } from "../src/navigation";
+import {
+  anchoredScrollTop,
+  anchorAfterClick,
+  nextEventBatch,
+} from "../src/navigation";
 const base = {
   scrollTop: 0,
   viewportHeight: 600,
@@ -54,5 +58,25 @@ describe("automatic event batches", () => {
     expect(nextEventBatch(100, 1000)).toBe(200);
     expect(nextEventBatch(100, 138)).toBe(138);
     expect(nextEventBatch(138, 138)).toBe(138);
+  });
+});
+
+describe("clicked navigation position", () => {
+  it("keeps a lower clicked row at its chosen height instead of centering it", () => {
+    const anchor = anchorAfterClick(0.8, "down");
+    expect(anchor).toBe(0.8);
+    expect(
+      anchoredScrollTop({
+        ...base,
+        scrollTop: 500,
+        itemTop: 1007,
+        anchorRatio: anchor,
+      }),
+    ).toBe(554);
+  });
+  it("preserves middle clicks and lets upper downward reading reach the middle naturally", () => {
+    expect(anchorAfterClick(0.55, "down")).toBe(0.55);
+    expect(anchorAfterClick(0.2, "down")).toBe(0.48);
+    expect(anchorAfterClick(0.2, "up")).toBe(0.2);
   });
 });

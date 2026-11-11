@@ -2922,3 +2922,48 @@ body,
 .event-list {
   position: relative;
 }
+
+/* Metrics are a scan-friendly definition list, not oversized statistic cards. */
+.metric-grid {
+  display: block;
+  margin: 0;
+}
+.metric {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  column-gap: 12px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--theme-border, var(--border));
+  min-width: 0;
+}
+.metric:last-child {
+  border-bottom: 0;
+}
+.metric dt {
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+}
+.metric dd {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0;
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.metric small {
+  grid-column: 1;
+  grid-row: 2;
+  margin: 2px 0 0;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.reader-section:has(.metric-grid) {
+  margin-bottom: 17px;
+}
+.reader-section:has(.metric-grid) > h3 {
+  margin-bottom: 5px;
+}

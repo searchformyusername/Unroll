@@ -24,13 +24,13 @@ The `dist/` output is a static site. No application backend, database service, a
 
 - Import multiple JSON, JSONL, NDJSON, or recognized `.traj` files; identical new imports focus the existing copy using a browser-computed content hash; the limit is 25 MB per file.
 - Supported structures: ATIF steps, OpenAI/Anthropic-style chat messages, Claude Code JSONL, and Codex rollout JSONL. Format detection uses the contents, not the filename. Arbitrary `.traj` schemas are not automatically supported.
-- Select an event to read its content, tool arguments, and all matching results in the right pane. Raw source and recorded metrics are separate tabs.
+- Select an event to read its content, tool arguments, and all matching results in the right pane. Content, Metrics, Source, and Run Metrics stay selected while navigating. Choosing a step interval highlights the step on the left and keeps the Run Metrics view and its scroll position in place.
 - Search is literal and case insensitive. Matches are highlighted in messages, reasoning, code, arguments, and results, including content beyond the initial preview.
-- Use **↑ / ↓** after selecting an event to move through the filtered list. Navigation keeps the selection near the middle with preceding and following events visible. **⌘/Ctrl K** focuses search; **⌘/Ctrl O** opens file import.
+- Use **↑ / ↓** after selecting an event to move through the filtered list. Navigation preserves the height of a lower row selected with the mouse; upper selections can advance naturally toward the middle, keeping surrounding events visible. **⌘/Ctrl K** focuses search; **⌘/Ctrl O** opens file import.
 - The expansion toggle opens or closes inline content across the list. Long lists load automatically in batches as you approach the last 20 rendered events; outputs remain bounded.
 - The initial split gives the timeline 60% of the workspace. Drag the divider to resize the reader. Drag it to the right edge to hide it; the edge arrow restores it for the currently selected event. The separator also supports left/right arrow keys, Home to reset, and End to hide.
 - Drag one sidebar trajectory onto another to create a group. The default name is selected for immediate renaming. Drop more files into a group, or drag a member onto the “Trajectories” heading to ungroup it. Each file’s menu also provides grouping controls for keyboard use and a Rename action to distinguish files with the same original name.
-- Appearance at the bottom of the sidebar offers Day/Night modes and Lavender, Sand, Paper, Sage, and Sky background palettes. Choices are saved locally; event-type icon colors stay consistent.
+- Five swatches at the bottom of the sidebar select Lavender, Sand, Paper, Sage, or Sky backgrounds. The Sun/Moon button switches Day/Night in one click. Choices are saved locally; event-type icon colors stay consistent.
 - Collapse the sidebar and reveal it from the left rail. Pin it to keep it open. Mobile uses a drawer and a separate event reading screen.
 
 ## Metrics and evidence

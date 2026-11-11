@@ -50,6 +50,7 @@ import TrajectoryList from "./TrajectoryList";
 import Appearance from "./Appearance";
 import {
   anchoredScrollTop,
+  anchorAfterClick,
   nextEventBatch,
   PREFETCH_EVENTS,
 } from "./navigation";
@@ -141,11 +142,23 @@ function Metric({
   value: string;
   note?: string;
 }) {
+  const usefulNote =
+    note &&
+    !["Not recorded", "Not recorded in this file", "Not available"].includes(
+      note,
+    )
+      ? note
+      : undefined;
   return (
     <div className="metric">
       <dt>{label}</dt>
-      <dd>{value}</dd>
-      {note && <small>{note}</small>}
+      <dd
+        title={value === "—" ? "Not available" : undefined}
+        aria-label={value === "—" ? "Not available" : undefined}
+      >
+        {value}
+      </dd>
+      {usefulNote && <small>{usefulNote}</small>}
     </div>
   );
 }
@@ -161,16 +174,11 @@ function UsageMetrics({ usage }: { usage?: Usage }) {
       <Metric label="Cache read" value={fmt(usage?.cacheRead)} />
       <Metric label="Cache write" value={fmt(usage?.cacheWrite)} />
       <Metric label="Reasoning tokens" value={fmt(usage?.reasoning)} />
-      <Metric
-        label="Reported cost"
-        value={money(usage?.costUsd)}
-        note="USD · recorded by source"
-      />
+      <Metric label="Cost (USD)" value={money(usage?.costUsd)} />
     </dl>
   );
 }
 export default function App() {
-  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [libraryLoaded, setLibraryLoaded] = useState(false);
   const [runs, setRuns] = useState<RunSummary[]>([]),
     [ready, setReady] = useState(false),
@@ -205,6 +213,8 @@ export default function App() {
     [resizing, setResizing] = useState(false);
   const workbenchRef = useRef<HTMLDivElement>(null);
   const pendingJump = useRef<string | null>(null);
+  const keyboardAnchor = useRef(0.48);
+  const clickedAnchor = useRef<number | null>(null);
   const preloadRef = useRef<HTMLDivElement>(null);
   const [stageLimit, setStageLimit] = useState(100);
   const unsaved = useRef(new Map<string, Run>());
@@ -213,12 +223,13 @@ export default function App() {
     runIndex.current = runs;
   }, [runs]);
   useEffect(() => {
-    if (!appearanceOpen && !pinned) {
+    if (!pinned) {
       if (document.activeElement?.closest(".sidebar"))
         navToggleRef.current?.focus({ preventScroll: true });
       setHoverNav(false);
     }
-  }, [appearanceOpen, pinned]);
+  }, [pinned]);
+
   const deferredQuery = useDeferredValue(query);
   const q = foldQuery(deferredQuery.trim());
   const fileRef = useRef<HTMLInputElement>(null),
@@ -400,13 +411,13 @@ export default function App() {
     setSelectedId(
       events.find((e) => e.kind !== "usage" && !e.offPath)?.id || null,
     );
-    setOverview(false);
-    setReaderTab("content");
     setLimit(100);
     setOverrides(new Set());
     setExpanded(false);
     setMobileReading(false);
     setStageLimit(100);
+    keyboardAnchor.current = 0.48;
+    clickedAnchor.current = null;
   }, [run?.id]);
   useEffect(() => {
     setLimit(100);
@@ -419,8 +430,8 @@ export default function App() {
     if (!pendingJump.current) listRef.current?.scrollTo({ top: 0 });
   }, [q, filter, showUsage, showBranches]);
   useEffect(() => {
-    readerRef.current?.scrollTo({ top: 0 });
-  }, [selectedId, readerTab]);
+    if (!overview) readerRef.current?.scrollTo({ top: 0 });
+  }, [selectedId, readerTab, overview]);
   useEffect(() => {
     const listener = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -472,7 +483,7 @@ export default function App() {
   ) {
     const source = analysis?.totalsSource?.[key];
     return source === "reported"
-      ? "Reported session total"
+      ? ""
       : source === "summed"
         ? `Sum of ${analysis?.requestCount} recorded requests`
         : analysis?.incompleteTotals?.includes(key)
@@ -481,21 +492,35 @@ export default function App() {
   }
   const source = useMemo(
     () =>
-      readerTab === "source" && selected
+      readerTab === "source" && selected && !overview
         ? stringify(selected.raw ?? selected)
         : "",
-    [readerTab, selected],
+    [readerTab, selected, overview],
   );
-  function select(e: TraceEvent) {
+  function select(e: TraceEvent, rememberPosition = false) {
+    if (rememberPosition) {
+      const list = listRef.current,
+        row = document.getElementById("event-" + e.id);
+      if (list && row && list.clientHeight) {
+        const r = (
+            row.querySelector<HTMLElement>(".row-top") || row
+          ).getBoundingClientRect(),
+          v = list.getBoundingClientRect();
+        clickedAnchor.current =
+          (r.top + Math.min(r.height, list.clientHeight * 0.5) / 2 - v.top) /
+          list.clientHeight;
+      }
+    }
+
     setSelectedId(e.id);
-    setOverview(false);
-    setReaderTab("content");
     setMobileReading(true);
   }
   function jump(id: string) {
     const e = events.find((e) => e.id === id);
     if (!e) return;
     pendingJump.current = id;
+    keyboardAnchor.current = 0.48;
+    clickedAnchor.current = null;
     setFilter("all");
     setQuery("");
     if (e.offPath) setShowBranches(true);
@@ -507,13 +532,28 @@ export default function App() {
     if (!id || deferredQuery !== query) return;
     const row = document.getElementById("event-" + id);
     if (row) {
-      row.scrollIntoView({ block: "center" });
-      row
-        .querySelector<HTMLButtonElement>(".row-main")
-        ?.focus({ preventScroll: true });
+      const list = listRef.current;
+      if (list) {
+        const r = (
+            row.querySelector<HTMLElement>(".row-top") || row
+          ).getBoundingClientRect(),
+          v = list.getBoundingClientRect();
+        list.scrollTop = Math.max(
+          0,
+          list.scrollTop +
+            r.top -
+            v.top +
+            Math.min(r.height, list.clientHeight * 0.5) / 2 -
+            list.clientHeight * 0.48,
+        );
+      }
+      if (!overview)
+        row
+          .querySelector<HTMLButtonElement>(".row-main")
+          ?.focus({ preventScroll: true });
       pendingJump.current = null;
     }
-  }, [selectedId, visible, deferredQuery, query]);
+  }, [selectedId, visible, deferredQuery, query, overview]);
 
   function openImport(which: "file" | "url") {
     setMode(which);
@@ -652,6 +692,17 @@ export default function App() {
       active = false;
       setLimit((n) => nextEventBatch(Math.max(n, renderLimit), visible.length));
     };
+    // A jump can land past the marker without ever intersecting it.
+    if (
+      root.clientHeight > 0 &&
+      marker.getBoundingClientRect().top <=
+        root.getBoundingClientRect().bottom + 100
+    ) {
+      load();
+      return () => {
+        active = false;
+      };
+    }
     if (typeof IntersectionObserver === "undefined") {
       const check = () => {
         if (
@@ -745,7 +796,11 @@ export default function App() {
       <aside
         className={`sidebar ${!pinned && hoverNav ? "hover-open" : ""} ${mobileNav ? "mobile-open" : ""}`}
         onMouseLeave={() => {
-          if (!appearanceOpen) setHoverNav(false);
+          if (
+            !document.activeElement?.matches(":focus-visible") ||
+            !document.activeElement.closest(".sidebar")
+          )
+            setHoverNav(false);
         }}
         aria-label="Trajectories"
       >
@@ -804,7 +859,7 @@ export default function App() {
           onRename={(id, name) => void renameTrajectory(id, name)}
         />
         <div className="sidebar-preferences">
-          <Appearance onOpenChange={setAppearanceOpen} />
+          <Appearance />
         </div>
         <div className="sidebar-bottom">
           <a
@@ -922,7 +977,8 @@ export default function App() {
                   target.closest(
                     'input,textarea,select,[contenteditable="true"]',
                   ) ||
-                  !target.closest(".event-row,.reader-column")
+                  !target.closest(".event-row,.reader-column") ||
+                  (overview && !!target.closest(".reader-column"))
                 )
                   return;
                 const next = position + (e.key === "ArrowDown" ? 1 : -1);
@@ -933,6 +989,13 @@ export default function App() {
                     ? nextEventBatch(Math.max(n, position + 1), visible.length)
                     : Math.max(n, next + 1),
                 );
+                if (clickedAnchor.current !== null) {
+                  keyboardAnchor.current = anchorAfterClick(
+                    clickedAnchor.current,
+                    e.key === "ArrowDown" ? "down" : "up",
+                  );
+                  clickedAnchor.current = null;
+                }
                 select(visible[next]);
                 requestAnimationFrame(() => {
                   const row = document.getElementById(
@@ -943,7 +1006,9 @@ export default function App() {
                     ?.focus({ preventScroll: true });
                   const list = listRef.current;
                   if (row && list) {
-                    const item = row.getBoundingClientRect(),
+                    const item = (
+                        row.querySelector<HTMLElement>(".row-top") || row
+                      ).getBoundingClientRect(),
                       viewport = list.getBoundingClientRect();
                     list.scrollTop = anchoredScrollTop({
                       scrollTop: list.scrollTop,
@@ -951,6 +1016,7 @@ export default function App() {
                       scrollHeight: list.scrollHeight,
                       itemTop: item.top - viewport.top + list.scrollTop,
                       itemHeight: item.height,
+                      anchorRatio: keyboardAnchor.current,
                       direction: e.key === "ArrowDown" ? "down" : "up",
                     });
                   }
@@ -1125,12 +1191,12 @@ export default function App() {
                           </div>
                         )}
                         <article
-                          className={`event-row type-${e.kind} actor-${e.actor} tool-${e.kind === "tool_call" ? toolCategory(e.name) : "none"} ${selectedId === e.id && !overview ? "selected" : ""} ${hasError ? "has-error" : ""}`}
+                          className={`event-row type-${e.kind} actor-${e.actor} tool-${e.kind === "tool_call" ? toolCategory(e.name) : "none"} ${selectedId === e.id ? "selected" : ""} ${hasError ? "has-error" : ""}`}
                         >
                           <div className="row-top">
                             <button
                               className="row-main"
-                              onClick={() => select(e)}
+                              onClick={() => select(e, true)}
                               aria-label={`Read event ${e.idx + 1}: ${nameOf(e)}`}
                               aria-current={
                                 selectedId === e.id ? "true" : undefined
@@ -1368,7 +1434,11 @@ export default function App() {
                 <div
                   className="reader-scroll"
                   ref={readerRef}
-                  key={`${selectedId}-${overview}-${readerTab}`}
+                  key={
+                    overview
+                      ? `${run.id}-run-metrics`
+                      : `${selectedId}-${readerTab}`
+                  }
                 >
                   {overview ? (
                     <>
@@ -1384,7 +1454,7 @@ export default function App() {
                             <Metric
                               label="Recorded turn time"
                               value={ms(timing.recordedDurationMs)}
-                              note="Sum of source-reported turn durations"
+                              note="Sum of turn durations"
                             />
                           )}
                           <Metric
@@ -1396,7 +1466,7 @@ export default function App() {
                             }
                             note={
                               timing?.ttftMs?.length
-                                ? `${timing.ttftMs.length} reported measurements`
+                                ? `${timing.ttftMs.length} measurements`
                                 : "Not recorded in this file"
                             }
                           />
@@ -1408,7 +1478,14 @@ export default function App() {
                           <Metric
                             label="Input tokens"
                             value={fmt(analysis?.inputTokens)}
-                            note={`${totalNote("inputTokens")}${analysis?.inputTokens !== undefined ? " · includes cache" : ""}`}
+                            note={[
+                              totalNote("inputTokens"),
+                              analysis?.inputTokens !== undefined
+                                ? "Includes cached input"
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
                           />
                           <Metric
                             label="Output tokens"
@@ -1437,7 +1514,14 @@ export default function App() {
                           <Metric
                             label="Reasoning tokens"
                             value={fmt(analysis?.reasoningTokens)}
-                            note={`${totalNote("reasoningTokens")}${analysis?.reasoningTokens !== undefined ? " · included in output" : ""}`}
+                            note={[
+                              totalNote("reasoningTokens"),
+                              analysis?.reasoningTokens !== undefined
+                                ? "Included in output"
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
                           />
                           <Metric
                             label="Cost (USD)"
@@ -1465,7 +1549,10 @@ export default function App() {
                             {analysis.evaluationMetrics.map((metric, i) => (
                               <Metric
                                 key={i}
-                                label={`Reported ${metric.label}`}
+                                label={
+                                  metric.label.charAt(0).toUpperCase() +
+                                  metric.label.slice(1)
+                                }
                                 value={String(metric.value)}
                                 note={metric.source}
                               />
@@ -1579,7 +1666,7 @@ export default function App() {
                               note={
                                 pickedTiming?.durationMs === undefined
                                   ? "Not recorded"
-                                  : "Reported by the source"
+                                  : undefined
                               }
                             />
                             <Metric
@@ -1588,7 +1675,7 @@ export default function App() {
                               note={
                                 pickedTiming?.ttftMs === undefined
                                   ? "Not recorded"
-                                  : "Reported by the source"
+                                  : undefined
                               }
                             />
                           </dl>
@@ -1626,9 +1713,7 @@ export default function App() {
                                     Output
                                     {related.length > 1 ? ` ${j + 1}` : ""}
                                     {r.isError && (
-                                      <span className="error-label">
-                                        Error reported
-                                      </span>
+                                      <span className="error-label">Error</span>
                                     )}
                                     <Copy text={textOf(r)} />
                                   </div>
@@ -1666,7 +1751,7 @@ export default function App() {
                           <div className="reading-timing">
                             <Clock3 size={13} />
                             {pickedTiming.durationMs !== undefined
-                              ? `${ms(pickedTiming.durationMs)} reported duration`
+                              ? `${ms(pickedTiming.durationMs)} duration`
                               : `${ms(pickedTiming.nextGapMs)} until the next recorded step`}
                             <button onClick={() => setReaderTab("metrics")}>
                               Metrics <ArrowRight size={12} />
