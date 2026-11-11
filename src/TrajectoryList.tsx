@@ -53,6 +53,29 @@ export default function TrajectoryList({
     [closed, setClosed] = useState<Set<string>>(new Set()),
     [over, setOver] = useState(""),
     [menu, setMenu] = useState<string | null>(null);
+  const menuPanel = useRef<HTMLDivElement>(null);
+  const menuTrigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (menu === null) return;
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node &&
+        !menuPanel.current?.contains(event.target) &&
+        !menuTrigger.current?.contains(event.target)) setMenu(null);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      menuTrigger.current?.focus({ preventScroll: true });
+      setMenu(null);
+    };
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("keydown", escape, true);
+    return () => {
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("keydown", escape, true);
+    };
+  }, [menu]);
   const rename = useRef<HTMLInputElement>(null);
   const fileRename = useRef<HTMLInputElement>(null);
   const [editingRun, setEditingRun] = useState<string | null>(null),
@@ -279,12 +302,14 @@ export default function TrajectoryList({
         <button
           className="run-menu-button icon-button"
           aria-label={`Options for ${run.name}`}
+          aria-expanded={menu === run.id}
+          ref={menu === run.id ? menuTrigger : undefined}
           onClick={() => setMenu(menu === run.id ? null : run.id)}
         >
           <MoreHorizontal size={14} />
         </button>
         {menu === run.id && (
-          <div className="run-menu">
+          <div className="run-menu" ref={menuPanel}>
             <button
               onClick={() => {
                 cancelFileRename.current = false;
@@ -448,12 +473,14 @@ export default function TrajectoryList({
               <button
                 className="icon-button"
                 aria-label={`Options for ${group.name}`}
+                aria-expanded={menu === group.id}
+                ref={menu === group.id ? menuTrigger : undefined}
                 onClick={() => setMenu(menu === group.id ? null : group.id)}
               >
                 <MoreHorizontal size={13} />
               </button>
               {menu === group.id && (
-                <div className="group-menu">
+                <div className="group-menu" ref={menuPanel}>
                   <button onClick={() => beginRename(group)}>
                     <Pencil size={13} />
                     Rename group
