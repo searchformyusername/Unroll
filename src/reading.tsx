@@ -180,16 +180,48 @@ const REMARK_PLUGINS = [remarkGfm];
 export const Markdown = memo(function Markdown({
   text,
   query = "",
+  onEvent,
 }: {
   text: string;
   query?: string;
+  onEvent?: (index: number) => void;
 }) {
+  const components = useMemo(
+    () =>
+      onEvent
+        ? {
+            ...MARKDOWN_COMPONENTS,
+            a: ({
+              children,
+              href,
+            }: {
+              children?: ReactNode;
+              href?: string;
+            }) => {
+              const match = href?.match(/^#event-(\d+)$/);
+              return match ? (
+                <button
+                  className="chat-event-link"
+                  onClick={() => onEvent(Number(match[1]))}
+                >
+                  {children}
+                </button>
+              ) : (
+                <a href={href} target="_blank" rel="noopener noreferrer">
+                  {children}
+                </a>
+              );
+            },
+          }
+        : MARKDOWN_COMPONENTS,
+    [onEvent],
+  );
   const plugins = useMemo(() => [highlighter(query)], [query]);
   return (
     <ReactMarkdown
       remarkPlugins={REMARK_PLUGINS}
       rehypePlugins={plugins}
-      components={MARKDOWN_COMPONENTS}
+      components={components}
     >
       {text}
     </ReactMarkdown>

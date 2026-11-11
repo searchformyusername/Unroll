@@ -2967,3 +2967,23 @@ body,
 .reader-section:has(.metric-grid) > h3 {
   margin-bottom: 5px;
 }
+
+/* Shared reader controls must work before the optional chat bundle is loaded. */
+.run-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.reader-scroll.chat-hidden { display: none; }
+.reader-column { container-type: inline-size; container-name: reader; }
+@container reader (max-width: 360px) {
+  .reader-tabs { padding-left: 12px; padding-right: 12px; gap: 12px; }
+  .reader-tabs > button { font-size: 10px; flex-shrink: 0; }
+  .reader-tabs > span { display: none; }
+}
+@media (max-width: 500px) {
+  .run-actions .overview-button > span { display: none; }
+}

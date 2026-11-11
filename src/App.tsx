@@ -1,4 +1,12 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -21,6 +29,7 @@ import {
   Link2,
   LoaderCircle,
   MessageSquare,
+  MessagesSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Pin,
@@ -48,6 +57,8 @@ import {
 } from "./storage";
 import TrajectoryList from "./TrajectoryList";
 import Appearance from "./Appearance";
+const ChatAgent = lazy(() => import("./chat/ChatAgent"));
+import { useChatWorkspace } from "./chat/useChatWorkspace";
 import {
   anchoredScrollTop,
   anchorAfterClick,
@@ -58,7 +69,7 @@ import { fetchText, MAX_BYTES, parseRun } from "./importer";
 import { Content, Copy, Highlight, excerpt, stringify } from "./reading";
 
 type Filter = "all" | "message" | "thinking" | "tool_call" | "errors";
-type ReaderTab = "content" | "metrics" | "source";
+type ReaderTab = "content" | "metrics" | "source" | "chat";
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "message", label: "Messages" },
@@ -137,10 +148,21 @@ function Logo() {
     </span>
   );
 }
-function SourceDetails({ label, value, query = "" }: { label: string; value: unknown; query?: string }) {
+function SourceDetails({
+  label,
+  value,
+  query = "",
+}: {
+  label: string;
+  value: unknown;
+  query?: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
-    <details className="metadata-source" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details
+      className="metadata-source"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary>{label}</summary>
       {open && <Content text={stringify(value)} query={query} />}
     </details>
@@ -229,7 +251,10 @@ export default function App() {
   useEffect(() => {
     if (!options) return;
     const outside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !viewOptionsRef.current?.contains(event.target))
+      if (
+        event.target instanceof Node &&
+        !viewOptionsRef.current?.contains(event.target)
+      )
         setOptions(false);
     };
     const escape = (event: KeyboardEvent) => {
@@ -277,6 +302,11 @@ export default function App() {
     navToggleRef = useRef<HTMLButtonElement>(null);
   const activeSummary = runs.find((r) => r.id === activeId) || runs[0];
   const run = currentRun?.id === activeSummary?.id ? currentRun : undefined;
+  const chat = useChatWorkspace(run?.id);
+  const [chatOpened, setChatOpened] = useState(false);
+  useEffect(() => {
+    if (readerTab === "chat") setChatOpened(true);
+  }, [readerTab]);
   const events = useMemo(() => run?.session.events || [], [run]);
   const analysis = useMemo(() => (run ? analyze(run.session) : null), [run]);
   const timing = useMemo(() => (run ? buildMetrics(run.session) : null), [run]);
@@ -449,7 +479,7 @@ export default function App() {
     setLimit(100);
     setOverrides(new Set());
     setExpanded(false);
-    setMobileReading(false);
+    setMobileReading(overview || readerTab === "chat");
     setStageLimit(100);
     keyboardAnchor.current = 0.48;
     clickedAnchor.current = null;
@@ -465,7 +495,8 @@ export default function App() {
     if (!pendingJump.current) listRef.current?.scrollTo({ top: 0 });
   }, [q, filter, showUsage, showBranches]);
   useEffect(() => {
-    if (!overview) readerRef.current?.scrollTo({ top: 0 });
+    if (!overview && readerTab !== "chat")
+      readerRef.current?.scrollTo({ top: 0 });
   }, [selectedId, readerTab, overview]);
   useEffect(() => {
     const listener = (e: KeyboardEvent) => {
@@ -601,14 +632,22 @@ export default function App() {
       : undefined;
     // Re-imports refresh the parsed snapshot after parser improvements, while preserving
     // the library identity, custom name, group membership, and original import order.
-    if (duplicate) next = { ...next, id: duplicate.id, name: duplicate.name, importedAt: duplicate.importedAt };
+    if (duplicate)
+      next = {
+        ...next,
+        id: duplicate.id,
+        name: duplicate.name,
+        importedAt: duplicate.importedAt,
+      };
     runIndex.current = duplicate
-      ? runIndex.current.map((r) => r.id === next.id ? summarize(next) : r)
+      ? runIndex.current.map((r) => (r.id === next.id ? summarize(next) : r))
       : [summarize(next), ...runIndex.current];
     setCurrentRun(next);
-    setRuns((prev) => duplicate
-      ? prev.map((r) => r.id === next.id ? summarize(next) : r)
-      : [summarize(next), ...prev]);
+    setRuns((prev) =>
+      duplicate
+        ? prev.map((r) => (r.id === next.id ? summarize(next) : r))
+        : [summarize(next), ...prev],
+    );
     setActiveId(next.id);
     setMobileNav(false);
     try {
@@ -709,6 +748,7 @@ export default function App() {
     if (!removeId) return;
     try {
       await deleteRun(removeId);
+      chat.remove(removeId);
       unsaved.current.delete(removeId);
       setRuns((prev) => prev.filter((r) => r.id !== removeId));
       setRemoveId(null);
@@ -983,18 +1023,34 @@ export default function App() {
                   </span>
                 </div>
               </div>
-              <button
-                className={`overview-button ${overview ? "active" : ""}`}
-                aria-label="Run metrics"
-                aria-pressed={overview}
-                onClick={() => {
-                  setOverview(!overview);
-                  setMobileReading(true);
-                }}
-              >
-                <BarChart3 size={15} />
-                <span>Run metrics</span>
-              </button>
+              <div className="run-actions">
+                <button
+                  className={`overview-button ${!overview && readerTab === "chat" ? "active" : ""}`}
+                  aria-label="Chat Agent"
+                  aria-pressed={!overview && readerTab === "chat"}
+                  onClick={() => {
+                    setOverview(false);
+                    setReaderTab("chat");
+                    setReaderHidden(false);
+                    setMobileReading(true);
+                  }}
+                >
+                  <MessagesSquare size={15} />
+                  <span>Chat Agent</span>
+                </button>
+                <button
+                  className={`overview-button ${overview ? "active" : ""}`}
+                  aria-label="Run metrics"
+                  aria-pressed={overview}
+                  onClick={() => {
+                    setOverview(!overview);
+                    setMobileReading(true);
+                  }}
+                >
+                  <BarChart3 size={15} />
+                  <span>Run metrics</span>
+                </button>
+              </div>
             </header>
             <div
               ref={workbenchRef}
@@ -1013,7 +1069,7 @@ export default function App() {
                 const target = e.target as HTMLElement;
                 if (
                   target.closest(
-                    'input,textarea,select,[contenteditable="true"]',
+                    'input,textarea,select,[contenteditable="true"],.chat-agent',
                   ) ||
                   !target.closest(".event-row,.reader-column") ||
                   (overview && !!target.closest(".reader-column"))
@@ -1396,7 +1452,7 @@ export default function App() {
                     <ArrowLeft size={17} />
                   </button>
                   <div className="reader-title-line">
-                    {!overview && (
+                    {!overview && readerTab !== "chat" && (
                       <span className="reader-caption">
                         {overview
                           ? "RUN METRICS"
@@ -1408,12 +1464,14 @@ export default function App() {
                     <h2>
                       {overview
                         ? "Run metrics"
-                        : selected
-                          ? nameOf(selected)
-                          : "Select an event"}
+                        : readerTab === "chat"
+                          ? "Chat Agent"
+                          : selected
+                            ? nameOf(selected)
+                            : "Select an event"}
                     </h2>
                   </div>
-                  {!overview && selected && (
+                  {!overview && readerTab !== "chat" && selected && (
                     <div className="event-navigation">
                       <button
                         className="icon-button"
@@ -1436,31 +1494,38 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                {!overview && selected && (
+                {
                   <div
                     className="reader-tabs"
                     role="tablist"
                     aria-label="Event details"
                   >
-                    {(["content", "metrics", "source"] as ReaderTab[]).map(
-                      (t) => (
-                        <button
-                          key={t}
-                          role="tab"
-                          aria-selected={readerTab === t}
-                          className={readerTab === t ? "active" : ""}
-                          onClick={() => setReaderTab(t)}
-                        >
-                          {t === "content"
-                            ? "Content"
-                            : t === "metrics"
-                              ? "Metrics"
-                              : "Source"}
-                        </button>
-                      ),
-                    )}
+                    {(
+                      ["content", "metrics", "source", "chat"] as ReaderTab[]
+                    ).map((t) => (
+                      <button
+                        key={t}
+                        role="tab"
+                        aria-selected={!overview && readerTab === t}
+                        disabled={t !== "chat" && !selected}
+                        className={!overview && readerTab === t ? "active" : ""}
+                        onClick={() => {
+                          setOverview(false);
+                          setReaderTab(t);
+                          setMobileReading(true);
+                        }}
+                      >
+                        {t === "content"
+                          ? "Content"
+                          : t === "metrics"
+                            ? "Metrics"
+                            : t === "source"
+                              ? "Source"
+                              : "Chat Agent"}
+                      </button>
+                    ))}
                     <span>
-                      {selected.ts && Number.isFinite(Date.parse(selected.ts))
+                      {selected?.ts && Number.isFinite(Date.parse(selected.ts))
                         ? new Date(selected.ts).toLocaleTimeString(undefined, {
                             hour: "2-digit",
                             minute: "2-digit",
@@ -1469,9 +1534,9 @@ export default function App() {
                         : ""}
                     </span>
                   </div>
-                )}
+                }
                 <div
-                  className="reader-scroll"
+                  className={`reader-scroll ${!overview && readerTab === "chat" ? "chat-hidden" : ""}`}
                   ref={readerRef}
                   key={
                     overview
@@ -1659,7 +1724,12 @@ export default function App() {
                           </button>
                         )}
                       </div>
-                      <SourceDetails label="Source metadata" value={run.session.meta.sourceMetadata ?? run.session.meta} />
+                      <SourceDetails
+                        label="Source metadata"
+                        value={
+                          run.session.meta.sourceMetadata ?? run.session.meta
+                        }
+                      />
                       {!!run.session.meta.hiddenReasoningCount && (
                         <p className="data-note">
                           {String(run.session.meta.hiddenReasoningCount)}{" "}
@@ -1667,7 +1737,7 @@ export default function App() {
                         </p>
                       )}
                     </>
-                  ) : selected ? (
+                  ) : readerTab === "chat" ? null : selected ? (
                     readerTab === "source" ? (
                       <div className="reader-section">
                         <div className="section-label">
@@ -1675,11 +1745,22 @@ export default function App() {
                           <Copy text={source} />
                         </div>
                         <Content text={source} query={q} />
-                        {selected.sourceStep !== undefined && selected.sourceStep !== selected.raw && (
-                          <SourceDetails key={selected.id} label="Complete source step" value={selected.sourceStep} query={q} />
-                        )}
+                        {selected.sourceStep !== undefined &&
+                          selected.sourceStep !== selected.raw && (
+                            <SourceDetails
+                              key={selected.id}
+                              label="Complete source step"
+                              value={selected.sourceStep}
+                              query={q}
+                            />
+                          )}
                         {related.map((result, index) => (
-                          <SourceDetails key={result.id} label={`Result source${related.length > 1 ? ` ${index + 1}` : ""}`} value={result.raw ?? result} query={q} />
+                          <SourceDetails
+                            key={result.id}
+                            label={`Result source${related.length > 1 ? ` ${index + 1}` : ""}`}
+                            value={result.raw ?? result}
+                            query={q}
+                          />
                         ))}
                       </div>
                     ) : readerTab === "metrics" ? (
@@ -1802,6 +1883,35 @@ export default function App() {
                     </div>
                   )}
                 </div>
+                {(chatOpened || readerTab === "chat") && (
+                  <Suspense
+                    fallback={
+                      <div className="reader-empty" role="status">
+                        Opening Chat Agent…
+                      </div>
+                    }
+                  >
+                    <ChatAgent
+                      run={run}
+                      selectedId={selectedId}
+                      visible={!overview && readerTab === "chat"}
+                      workspace={chat}
+                      onEvent={(number) => {
+                        const event = events[number - 1];
+                        if (event)
+                          jump(
+                            event.kind === "tool_result" && event.callId
+                              ? events.find(
+                                  (candidate) =>
+                                    candidate.kind === "tool_call" &&
+                                    candidate.callId === event.callId,
+                                )?.id || event.id
+                              : event.id,
+                          );
+                      }}
+                    />
+                  </Suspense>
+                )}
               </section>
             </div>
           </>
