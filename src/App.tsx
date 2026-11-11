@@ -95,13 +95,17 @@ const nameOf = (e: TraceEvent) =>
         ? "Token usage"
         : e.kind === "tool_result"
           ? "Tool result"
-          : e.kind === "unknown"
-            ? "Unknown record"
-            : e.actor === "assistant"
-              ? "Assistant"
-              : e.actor === "user"
-                ? "User"
-                : e.name?.replace(/_/g, " ") || "System";
+          : e.kind === "meta"
+            ? e.name === "source_step"
+              ? "Source step"
+              : e.name?.replace(/_/g, " ") || "Marker"
+            : e.kind === "unknown"
+              ? "Unknown record"
+              : e.actor === "assistant"
+                ? "Assistant"
+                : e.actor === "user"
+                  ? "User"
+                  : e.name?.replace(/_/g, " ") || "System";
 function toolCategory(name?: string) {
   return /write|edit|replace|patch/i.test(name || "")
     ? "change"
@@ -131,6 +135,15 @@ function Logo() {
     <span className="logo-symbol" aria-hidden="true">
       <img src={unrollIcon} alt="" />
     </span>
+  );
+}
+function SourceDetails({ label, value, query = "" }: { label: string; value: unknown; query?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details className="metadata-source" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>{label}</summary>
+      {open && <Content text={stringify(value)} query={query} />}
+    </details>
   );
 }
 function Metric({
@@ -564,18 +577,21 @@ export default function App() {
     const duplicate = next.fingerprint
       ? runIndex.current.find((r) => r.fingerprint === next.fingerprint)
       : undefined;
-    if (duplicate) {
-      setActiveId(duplicate.id);
-      setMobileNav(false);
-      return;
-    }
-    runIndex.current = [summarize(next), ...runIndex.current];
+    // Re-imports refresh the parsed snapshot after parser improvements, while preserving
+    // the library identity, custom name, group membership, and original import order.
+    if (duplicate) next = { ...next, id: duplicate.id, name: duplicate.name, importedAt: duplicate.importedAt };
+    runIndex.current = duplicate
+      ? runIndex.current.map((r) => r.id === next.id ? summarize(next) : r)
+      : [summarize(next), ...runIndex.current];
     setCurrentRun(next);
-    setRuns((prev) => [summarize(next), ...prev]);
+    setRuns((prev) => duplicate
+      ? prev.map((r) => r.id === next.id ? summarize(next) : r)
+      : [summarize(next), ...prev]);
     setActiveId(next.id);
     setMobileNav(false);
     try {
       await saveRun(next);
+      unsaved.current.delete(next.id);
     } catch {
       unsaved.current.set(next.id, next);
       setNotice(
@@ -1620,16 +1636,7 @@ export default function App() {
                           </button>
                         )}
                       </div>
-                      <details className="metadata-source">
-                        <summary>Source metadata</summary>
-                        <Content
-                          text={stringify(
-                            run.session.meta.finalMetrics ??
-                              run.session.meta.totalUsage ??
-                              run.session.meta,
-                          )}
-                        />
-                      </details>
+                      <SourceDetails label="Source metadata" value={run.session.meta.sourceMetadata ?? run.session.meta} />
                       {!!run.session.meta.hiddenReasoningCount && (
                         <p className="data-note">
                           {String(run.session.meta.hiddenReasoningCount)}{" "}
@@ -1645,6 +1652,12 @@ export default function App() {
                           <Copy text={source} />
                         </div>
                         <Content text={source} query={q} />
+                        {selected.sourceStep !== undefined && selected.sourceStep !== selected.raw && (
+                          <SourceDetails key={selected.id} label="Complete source step" value={selected.sourceStep} query={q} />
+                        )}
+                        {related.map((result, index) => (
+                          <SourceDetails key={result.id} label={`Result source${related.length > 1 ? ` ${index + 1}` : ""}`} value={result.raw ?? result} query={q} />
+                        ))}
                       </div>
                     ) : readerTab === "metrics" ? (
                       <>

@@ -22,9 +22,10 @@ The `dist/` output is a static site. No application backend, database service, a
 
 ## Reading trajectories
 
-- Import multiple JSON, JSONL, NDJSON, or recognized `.traj` files; identical new imports focus the existing copy using a browser-computed content hash; the limit is 25 MB per file.
+- Import multiple JSON, JSONL, NDJSON, or recognized `.traj` files; identical imports refresh the existing parsed copy using a browser-computed content hash, preserving its name and group; the limit is 25 MB per file. JSON nested beyond 200 object/array levels is rejected with an actionable error.
 - Supported structures: ATIF steps, OpenAI/Anthropic-style chat messages, Claude Code JSONL, and Codex rollout JSONL. Format detection uses the contents, not the filename. Arbitrary `.traj` schemas are not automatically supported.
 - Select an event to read its content, tool arguments, and all matching results in the right pane. Content, Metrics, Source, and Run Metrics stay selected while navigating. Choosing a step interval highlights the step on the left and keeps the Run Metrics view and its scroll position in place.
+- **Source** exposes the original event, its complete ATIF step, and the original records of paired tool results. Run Metrics includes the original run metadata. Empty ATIF steps retain their timestamps, and unsupported content parts raise a diagnostic with the source preserved. Previously saved runs gain this additional metadata when the original file is re-imported.
 - Search is literal and case insensitive. Matches are highlighted in messages, reasoning, code, arguments, and results, including content beyond the initial preview.
 - Use **↑ / ↓** after selecting an event to move through the filtered list. Navigation preserves the height of a lower row selected with the mouse; upper selections can advance naturally toward the middle, keeping surrounding events visible. **⌘/Ctrl K** focuses search; **⌘/Ctrl O** opens file import.
 - The expansion toggle opens or closes inline content across the list. Long lists load automatically in batches as you approach the last 20 rendered events; outputs remain bounded.
@@ -37,7 +38,7 @@ The `dist/` output is a static site. No application backend, database service, a
 
 Timestamp intervals show the time until the next recorded source step, response, or request. They may include idle time and parallel work. They are **not** individual tool execution durations. Recorded durations and time to first token appear only when the source supplies an explicitly scoped measurement.
 
-Input token totals count prompts across requests, including cached tokens; they are not a conversation context size. A dash means the source did not record the metric, or request-level data is incomplete. Source-reported cost and reasoning-token totals are preserved. Reward/score values are shown only for explicitly named structured fields, with their source path; narrative claims are never treated as evaluation results. Explicit errors, repeated calls, and unusual timestamp gaps can be inspected through observations that link back to source events. Unroll does not judge correctness or invent a success score.
+Input token totals count prompts across requests, including cached tokens; they are not a conversation context size. A dash means the source did not record the metric, or request-level data is incomplete. Source-reported cost and reasoning-token totals are preserved. Reward/score values are shown only for explicitly named structured fields, with their source path; narrative claims are never treated as evaluation results. Explicit errors, repeated calls, and unusual timestamp gaps can be inspected through observations that link back to source events. Unroll does not judge correctness or invent a success score. Embedded sub-agent trajectories are retained in ATIF source metadata but are not expanded into separate timelines; referenced continuation files are not fetched automatically. Image and file parts are placeholders rather than media previews.
 
 ## Data handling
 
