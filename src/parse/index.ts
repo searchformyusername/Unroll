@@ -4,7 +4,7 @@ import { parseChat } from "./chat.ts";
 import { parseClaudeCode } from "./claudeCode.ts";
 import { parseCodex } from "./codex.ts";
 import { ITEM_TYPE } from "./items.ts";
-import { Builder, isObj, ParseError, type LineRec, type Rec } from "./util.ts";
+import { assertNestingDepth, Builder, isObj, ParseError, type LineRec, type Rec } from "./util.ts";
 
 export type {
   Actor,
@@ -129,6 +129,7 @@ function looksAtif(doc: Rec): doc is Rec & { steps: unknown[] } {
 }
 
 function fromDocument(doc: unknown): ParseResult {
+  assertNestingDepth(doc);
   const b = new Builder();
   if (Array.isArray(doc)) {
     if (doc.length === 0)
@@ -210,6 +211,9 @@ function fromLines(input: string, docError: string | undefined): ParseResult {
       );
       continue;
     }
+    // Depth violations are fatal, unlike malformed JSONL lines: silently dropping a deep record
+    // would hide source information and still leave downstream recursion at risk.
+    assertNestingDepth(v, `This trajectory (line ${line})`);
     if (isObj(v)) recs.push({ line, v });
     else {
       scalars++;

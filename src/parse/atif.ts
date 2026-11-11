@@ -8,6 +8,7 @@ import {
   isObj,
   num,
   parseArgs,
+  partText,
   str,
   timingFrom,
   timingText,
@@ -31,7 +32,8 @@ const SOURCE: Record<string, Actor> = {
  */
 export function parseAtif(doc: Rec, steps: unknown[], b: Builder): ParseResult {
   const agent = isObj(doc.agent) ? doc.agent : {};
-  const meta: SessionMeta = {};
+  const { steps: _steps, ...sourceMetadata } = doc;
+  const meta: SessionMeta = { sourceMetadata };
   const model = str(agent.model_name);
   if (model) meta.model = model;
   if (str(agent.name)) meta.agentName = agent.name;
@@ -66,6 +68,7 @@ export function parseAtif(doc: Rec, steps: unknown[], b: Builder): ParseResult {
       b.diag(`Step at position ${i + 1} is not an object; skipped.`);
       continue;
     }
+    const before = b.events.length;
     const key = idOf(s.step_id) ?? String(i + 1);
     const step = num(s.step_id) ?? i + 1;
     const base = `s${key}`;
@@ -80,6 +83,12 @@ export function parseAtif(doc: Rec, steps: unknown[], b: Builder): ParseResult {
     const ts = toIso(s.timestamp);
     if (!meta.model && str(s.model_name)) meta.model = str(s.model_name);
 
+    for (const field of ["message", "reasoning_content"] as const) {
+      const value = s[field];
+      const parts = Array.isArray(value) ? value : [value];
+      if (parts.some((part) => part != null && partText(part) === undefined))
+        b.diag(`Step ${key}: ${field} contains unsupported content; inspect the complete source step in Source.`);
+    }
     const reasoning = contentText(s.reasoning_content);
     if (reasoning.trim()) {
       b.push({
@@ -193,6 +202,15 @@ export function parseAtif(doc: Rec, steps: unknown[], b: Builder): ParseResult {
         ttftMs: timing.ttftMs,
       });
     }
+    // Keep even empty/metadata-only source steps visible, including their timestamps.
+    // Unsupported content must never disappear silently from the timeline.
+    if (b.events.length === before) {
+      b.push({
+        id: `${base}:source`, actor, kind: "meta", ts, step,
+        name: "source_step", text: "No readable content in this source step.", raw: s,
+      });
+    }
+    for (let j = before; j < b.events.length; j++) b.events[j].sourceStep = s;
   }
   if (pairedByStep) {
     meta.resultsPairedByStep = pairedByStep;

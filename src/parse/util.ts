@@ -52,16 +52,55 @@ export function toIso(v: unknown): string | undefined {
   return undefined;
 }
 
+/** Maximum object/array nesting accepted at every JSON decoding boundary. */
+export const MAX_NESTING_DEPTH = 200;
+
+/**
+ * Reject overly deep JSON before any normalizer, analyzer or renderer can recurse over it.
+ * An explicit frame per ancestor keeps auxiliary memory O(depth), even for very wide arrays.
+ * Primitives do not count as an additional container level.
+ */
+export function assertNestingDepth(value: unknown, context = "This trajectory"): void {
+  type Frame = { value: unknown[] | Rec; keys?: string[]; index: number };
+  const stack: Frame[] = [];
+  const enter = (child: unknown) => {
+    if (typeof child !== "object" || child === null) return;
+    if (stack.length >= MAX_NESTING_DEPTH) {
+      throw new ParseError(
+        "too_deep",
+        `${context} contains JSON nested more than ${MAX_NESTING_DEPTH} object/array levels. Flatten deeply nested data or keep the payload as plain text, then import again.`,
+      );
+    }
+    if (Array.isArray(child)) stack.push({ value: child, index: 0 });
+    else stack.push({ value: child as Rec, keys: Object.keys(child), index: 0 });
+  };
+  enter(value);
+  while (stack.length) {
+    const current = stack[stack.length - 1];
+    const length = current.keys ? current.keys.length : (current.value as unknown[]).length;
+    if (current.index >= length) { stack.pop(); continue; }
+    const child = current.keys
+      ? (current.value as Rec)[current.keys[current.index++]]
+      : (current.value as unknown[])[current.index++];
+    enter(child);
+  }
+}
+
 /** JSON-string tool arguments become objects; anything else is returned untouched. */
 export function parseArgs(v: unknown): unknown {
   if (typeof v !== "string") return v;
   const c = v.charCodeAt(0);
   if (c !== 123 && c !== 91) return v; // not '{' or '['
+  let decoded: unknown;
   try {
-    return JSON.parse(v);
+    decoded = JSON.parse(v);
   } catch {
     return v;
   }
+  // Keep this outside the JSON syntax catch: an unsafe decoded value must reject the import,
+  // not quietly fall back to the original encoded string.
+  assertNestingDepth(decoded, "This tool argument payload");
+  return decoded;
 }
 
 const TEXT_PART = new Set([
@@ -434,18 +473,24 @@ export class Builder {
     const pending = new Map<string, TraceEvent[]>();
     const latest = new Map<string, TraceEvent>();
     const seen = new Map<string, number>();
+    // Generated suffixes must not collide with any original id, including a later call
+    // or an orphan result. Otherwise unrelated outputs can be joined in the reader.
+    const reserved = new Set(this.events.map((e) => e.callId).filter((id) => id !== undefined));
+    const used = new Set<string>();
     let renamed = 0;
     let orphans = 0;
     for (const e of this.events) {
       const id = e.callId;
       if (id === undefined) continue;
       if (e.kind === "tool_call") {
-        const n = (seen.get(id) ?? 0) + 1;
-        seen.set(id, n);
+        let n = (seen.get(id) ?? 0) + 1;
         if (n > 1) {
+          while (reserved.has(`${id}#${n}`) || used.has(`${id}#${n}`)) n++;
           e.callId = `${id}#${n}`;
           renamed++;
         }
+        seen.set(id, n);
+        used.add(e.callId!);
         latest.set(id, e);
         const q = pending.get(id);
         if (q) q.push(e);
@@ -462,7 +507,7 @@ export class Builder {
     }
     if (renamed)
       this.diag(
-        `${renamed} tool call id(s) were reused by the source; later uses were renamed (id#2, id#3…) so calls and results pair correctly.`,
+        `${renamed} tool call id(s) were reused by the source; later uses were renamed (id#2, id#3…) and results were assigned in source order to unique internal call IDs.`,
       );
     if (orphans)
       this.diag(

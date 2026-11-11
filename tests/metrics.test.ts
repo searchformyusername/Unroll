@@ -19,20 +19,22 @@ describe("ATIF: grouped by the source step", () => {
   const m = buildMetrics(session);
 
   it("reports timestamp intervals between steps and never a duration", () => {
-    // step 3 has no content, so it produces no events and no step
+    // Empty steps retain their own timestamps instead of extending the previous interval.
     expect(m.steps.map(pick)).toEqual([
       ["Step 1", 0, 5000, null],
-      ["Step 2", 5000, 7000, null],
+      ["Step 2", 5000, 4000, null],
+      ["Step 3", 9000, 3000, null],
       ["Step 4", 12_000, null, null],
     ]);
     expect(m.steps.map((s) => [s.key, s.grouping, s.eventCount])).toEqual([
       ["s:1", "step", 1],
       ["s:2", "step", 7],
+      ["s:3", "step", 1],
       ["s:4", "step", 1],
     ]);
     expect(m.steps[0].startMs).toBe(T0);
     expect(m.durationMs).toBe(12_000);
-    expect(m.maxNextGapMs).toBe(7000);
+    expect(m.maxNextGapMs).toBe(5000);
     expect(m.ttftMs).toBeUndefined();
     expect(m.recordedDurationMs).toBeUndefined();
     expect(m.maxDurationMs).toBeUndefined();
@@ -58,7 +60,7 @@ describe("ATIF: grouped by the source step", () => {
     for (const c of calls) {
       const em = m.byEvent.get(c.id)!;
       expect(em.durationMs).toBeUndefined();
-      expect(em.nextGapMs).toBe(7000); // the step's interval, labelled as such
+      expect(em.nextGapMs).toBe(4000); // the step's interval, labelled as such
       expect(em.elapsedMs).toBe(5000);
       expect(em.usage).toEqual(m.steps[1].usage);
     }
@@ -75,7 +77,8 @@ describe("ATIF: grouped by the source step", () => {
     const mm = buildMetrics(s);
     expect(mm.steps.map(pick)).toEqual([
       ["Step 1", 0, 5000, null],
-      ["Step 2", 5000, 7000, 4100],
+      ["Step 2", 5000, 4000, 4100],
+      ["Step 3", 9000, 3000, null],
       ["Step 4", 12_000, null, null],
     ]);
     expect(mm.steps[1].ttftMs).toBe(620);

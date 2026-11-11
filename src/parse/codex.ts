@@ -1,5 +1,5 @@
 import type { ParseResult, SessionMeta } from "./types.ts";
-import { emitItem } from "./items.ts";
+import { actorOf, emitItem } from "./items.ts";
 import {
   Builder,
   contentText,
@@ -23,7 +23,7 @@ const MARKERS = new Set([
   "context_compacted",
   "thread_rolled_back",
 ]);
-/** event_msg duplicates of response_item content; only used when a file has no response_items. */
+/** Older readable event messages can coexist with response_items; only proven mirrors are skipped. */
 const LEGACY_MSG: Record<
   string,
   { actor: "user" | "assistant"; kind: "message" | "thinking" }
@@ -33,19 +33,74 @@ const LEGACY_MSG: Record<
   agent_reasoning: { actor: "assistant", kind: "thinking" },
 };
 
+/** The readable content a canonical response item displays, before harness-role relabeling. */
+function itemSignature(p: Rec): string | undefined {
+  if (p.type === "message" || (p.type === undefined && typeof p.role === "string")) {
+    const text = contentText(p.content);
+    if (text.trim()) return JSON.stringify([actorOf(str(p.role) ?? "assistant") ?? "system", "message", text]);
+  } else if (p.type === "reasoning") {
+    const summary = contentText(p.summary), body = contentText(p.content);
+    const text = summary && body ? summary + "\n\n" + body : summary || body;
+    if (text.trim()) return JSON.stringify(["assistant", "thinking", text]);
+  }
+  return undefined;
+}
+
+function legacyMessage(type: string) {
+  return Object.prototype.hasOwnProperty.call(LEGACY_MSG, type) ? LEGACY_MSG[type] : undefined;
+}
+
+/**
+ * Match exact mirrors one-to-one within a contiguous burst of identical readable content.
+ * Metadata and usage may sit between the two encodings; a different message, a tool action,
+ * compaction or a turn boundary ends the burst. This deliberately preserves uncertain repeats
+ * rather than deleting an identical prompt from a later turn just because it appeared earlier.
+ */
+function mirroredLegacy(recs: LineRec[]): Set<LineRec> {
+  const duplicates = new Set<LineRec>();
+  let signature: string | undefined;
+  let canonical = 0;
+  let legacy: LineRec[] = [];
+  const flush = () => {
+    for (let i = 0; i < Math.min(canonical, legacy.length); i++) duplicates.add(legacy[i]);
+    signature = undefined; canonical = 0; legacy = [];
+  };
+  const add = (sig: string, record: LineRec, isCanonical: boolean) => {
+    if (signature !== sig) { flush(); signature = sig; }
+    if (isCanonical) canonical++;
+    else legacy.push(record);
+  };
+  for (const record of recs) {
+    const p = isObj(record.v.payload) ? record.v.payload : {};
+    if (record.v.type === "response_item") {
+      const sig = itemSignature(p);
+      if (sig) add(sig, record, true);
+      else flush();
+    } else if (record.v.type === "event_msg") {
+      const pt = str(p.type) ?? "?";
+      const descriptor = legacyMessage(pt);
+      if (descriptor) {
+        const text = str(p.message) ?? str(p.text) ?? "";
+        if (text.trim()) add(JSON.stringify([descriptor.actor, descriptor.kind, text]), record, false);
+      } else if (pt !== "token_count" && pt !== "item_completed") flush();
+    } else if (record.v.type !== "token_usage_record" && record.v.type !== "world_state") flush();
+  }
+  flush();
+  return duplicates;
+}
+
 /** Codex CLI rollout: {timestamp, type, payload} per line. response_item is the source of truth. */
 export function parseCodex(recs: LineRec[], b: Builder): ParseResult {
   const meta: SessionMeta = {};
   let sessionId: string | undefined;
-  let hasItems = false;
+  const duplicateLegacy = mirroredLegacy(recs);
   let hasTokenCount = false;
   /** item id (or call_id) → duration from the item's own recorded start/end pair. */
   const itemMs = new Map<string, number>();
   for (const r of recs) {
     const p = r.v.payload;
-    if (r.v.type === "response_item") hasItems = true;
-    else if (r.v.type === "event_msg" && isObj(p)) {
-      if (p.type === "token_count") hasTokenCount = true;
+    if (r.v.type === "event_msg" && isObj(p)) {
+      if (p.type === "token_count" && isObj(p.info) && usageFrom(p.info.last_token_usage)) hasTokenCount = true;
       else if (p.type === "item_completed" && isObj(p.item)) {
         const id = idOf(p.item.id);
         const a = num(p.started_at_ms);
@@ -192,9 +247,10 @@ export function parseCodex(recs: LineRec[], b: Builder): ParseResult {
             durationMs: timing.durationMs,
             ttftMs: timing.ttftMs,
           });
-        } else if (!hasItems && LEGACY_MSG[pt]) {
+        } else if (legacyMessage(pt)) {
           const text = str(p.message) ?? str(p.text) ?? "";
-          if (text.trim()) b.push({ id, ts, text, raw: p, ...LEGACY_MSG[pt] });
+          if (duplicateLegacy.has(r)) skip(`event_msg:${pt}`);
+          else if (text.trim()) b.push({ id, ts, text, raw: p, ...legacyMessage(pt)! });
         } else {
           skip(`event_msg:${pt}`);
         }

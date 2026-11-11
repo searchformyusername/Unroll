@@ -57,6 +57,7 @@ describe("ATIF", () => {
       "tool_result",
       "tool_result",
       "usage",
+      "meta",
       "message",
     ]);
     expect(r.session.events.map((e) => e.actor)).toEqual([
@@ -69,9 +70,10 @@ describe("ATIF", () => {
       "tool",
       "system",
       "assistant",
+      "assistant",
     ]);
     expect(r.session.events.map((e) => e.step)).toEqual([
-      1, 2, 2, 2, 2, 2, 2, 2, 4,
+      1, 2, 2, 2, 2, 2, 2, 2, 3, 4,
     ]);
     expect(r.diagnostics).toEqual([]);
   });

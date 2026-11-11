@@ -31,6 +31,13 @@ export function parseChat(
     const model = str(wrapper.model) ?? str(wrapper.model_name);
     if (model) meta.model = model;
     if (Array.isArray(wrapper.tools)) meta.toolCount = wrapper.tools.length;
+    // Wrapper-level usage is the source's total; do not add it to per-message usage.
+    const totalUsage = usageFrom(wrapper.usage);
+    if (totalUsage) meta.totalUsage = totalUsage;
+    // Exclude only the actual transcript array, leaving unrelated wrapper fields intact.
+    meta.sourceMetadata = Object.fromEntries(Object.entries(wrapper).filter(([, value]) =>
+      !Array.isArray(value) || !value.some((item) => item === recs[0]?.v),
+    ));
     const evaluation = evaluationMetrics(wrapper);
     if (evaluation.length) meta.evaluationMetrics = evaluation;
     const sys = contentText(wrapper.system ?? wrapper.instructions);

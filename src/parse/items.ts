@@ -69,36 +69,35 @@ function failedHeader(text: string): true | undefined {
     : undefined;
 }
 
+/** Metadata handling is identical whether the envelope was JSON-encoded or already parsed. */
+function outputEnvelope(value: unknown): Out | undefined {
+  if (!isObj(value) || typeof value.output !== "string") return undefined;
+  const code = isObj(value.metadata) ? num(value.metadata.exit_code) : undefined;
+  return {
+    output: value.output,
+    isError: code === undefined ? undefined : code !== 0,
+    durationMs: timingFrom(value.metadata).durationMs,
+  };
+}
+
 /** Unwrap the tool-output envelopes different CLI versions use. */
 function normalizeOutput(v: unknown): Out {
   if (typeof v === "string") {
     if (v.charCodeAt(0) === 123) {
       try {
-        const j: unknown = JSON.parse(v);
-        if (isObj(j) && typeof j.output === "string") {
-          const code = isObj(j.metadata)
-            ? num(j.metadata.exit_code)
-            : undefined;
-          return {
-            output: j.output,
-            isError: code === undefined ? undefined : code !== 0,
-            durationMs: timingFrom(j.metadata).durationMs,
-          };
-        }
+        const envelope = outputEnvelope(JSON.parse(v));
+        if (envelope) return envelope;
       } catch {
         /* plain text that happens to start with "{" */
       }
     }
     return { output: v, isError: failedHeader(v), durationMs: headerMs(v) };
   }
-  if (
-    isObj(v) &&
-    typeof v.content === "string" &&
-    typeof v.success === "boolean"
-  ) {
+  if (isObj(v) && typeof v.content === "string" && typeof v.success === "boolean") {
     return { output: v.content, isError: !v.success };
   }
-  if (isObj(v) && typeof v.output === "string") return { output: v.output };
+  const envelope = outputEnvelope(v);
+  if (envelope) return envelope;
   const out = toolOutput(v);
   return typeof out === "string"
     ? { output: out, isError: failedHeader(out), durationMs: headerMs(out) }

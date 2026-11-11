@@ -68,6 +68,8 @@ export interface TraceEvent {
    * reference, so store a session as a single value and stringify lazily.
    */
   raw?: unknown;
+  /** Complete ATIF source step, shared by its events. Keeps step-level extensions accessible. */
+  sourceStep?: unknown;
   /** Previous event in the source's own chain (Claude Code tree). Absent for linear formats. */
   parentId?: string;
 
@@ -128,4 +130,5 @@ export type ParseErrorCode =
   | "empty"
   | "not_json"
   | "unknown_format"
-  | "no_events";
+  | "no_events"
+  | "too_deep";
