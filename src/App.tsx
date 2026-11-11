@@ -47,6 +47,7 @@ import {
   type RunSummary,
 } from "./storage";
 import TrajectoryList from "./TrajectoryList";
+import Appearance from "./Appearance";
 import {
   anchoredScrollTop,
   nextEventBatch,
@@ -169,6 +170,7 @@ function UsageMetrics({ usage }: { usage?: Usage }) {
   );
 }
 export default function App() {
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [libraryLoaded, setLibraryLoaded] = useState(false);
   const [runs, setRuns] = useState<RunSummary[]>([]),
     [ready, setReady] = useState(false),
@@ -210,6 +212,13 @@ export default function App() {
   useEffect(() => {
     runIndex.current = runs;
   }, [runs]);
+  useEffect(() => {
+    if (!appearanceOpen && !pinned) {
+      if (document.activeElement?.closest(".sidebar"))
+        navToggleRef.current?.focus({ preventScroll: true });
+      setHoverNav(false);
+    }
+  }, [appearanceOpen, pinned]);
   const deferredQuery = useDeferredValue(query);
   const q = foldQuery(deferredQuery.trim());
   const fileRef = useRef<HTMLInputElement>(null),
@@ -426,7 +435,7 @@ export default function App() {
           setModal(true);
         }
       }
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !e.defaultPrevented) {
         setOptions(false);
         setMobileNav(false);
       }
@@ -708,7 +717,7 @@ export default function App() {
           onClick={() => {
             if (window.matchMedia("(max-width:760px)").matches)
               setMobileNav(true);
-            else setHoverNav((v) => !v);
+            else setHoverNav(true);
           }}
         >
           <PanelLeftOpen size={18} />
@@ -735,7 +744,9 @@ export default function App() {
       )}
       <aside
         className={`sidebar ${!pinned && hoverNav ? "hover-open" : ""} ${mobileNav ? "mobile-open" : ""}`}
-        onMouseLeave={() => setHoverNav(false)}
+        onMouseLeave={() => {
+          if (!appearanceOpen) setHoverNav(false);
+        }}
         aria-label="Trajectories"
       >
         <div className="sidebar-top">
@@ -792,6 +803,9 @@ export default function App() {
           onNotice={setNotice}
           onRename={(id, name) => void renameTrajectory(id, name)}
         />
+        <div className="sidebar-preferences">
+          <Appearance onOpenChange={setAppearanceOpen} />
+        </div>
         <div className="sidebar-bottom">
           <a
             href="https://github.com/searchformyusername/Unroll"
