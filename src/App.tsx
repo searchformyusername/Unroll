@@ -47,6 +47,11 @@ import {
   type RunSummary,
 } from "./storage";
 import TrajectoryList from "./TrajectoryList";
+import {
+  anchoredScrollTop,
+  nextEventBatch,
+  PREFETCH_EVENTS,
+} from "./navigation";
 import { fetchText, MAX_BYTES, parseRun } from "./importer";
 import { Content, Copy, Highlight, excerpt, stringify } from "./reading";
 
@@ -193,11 +198,12 @@ export default function App() {
     [mobileReading, setMobileReading] = useState(false);
   const [currentRun, setCurrentRun] = useState<Run | null>(null),
     [runLoading, setRunLoading] = useState(false),
-    [split, setSplit] = useState(46),
+    [split, setSplit] = useState(60),
     [readerHidden, setReaderHidden] = useState(false),
     [resizing, setResizing] = useState(false);
   const workbenchRef = useRef<HTMLDivElement>(null);
   const pendingJump = useRef<string | null>(null);
+  const preloadRef = useRef<HTMLDivElement>(null);
   const [stageLimit, setStageLimit] = useState(100);
   const unsaved = useRef(new Map<string, Run>());
   const runIndex = useRef<RunSummary[]>([]);
@@ -626,6 +632,48 @@ export default function App() {
   }
   const stageMax = timing?.maxNextGapMs || 1;
   const renderLimit = Math.max(limit, position + 1);
+  useEffect(() => {
+    if (renderLimit >= visible.length) return;
+    const root = listRef.current,
+      marker = preloadRef.current;
+    if (!root || !marker) return;
+    let active = true;
+    const load = () => {
+      if (!active) return;
+      active = false;
+      setLimit((n) => nextEventBatch(Math.max(n, renderLimit), visible.length));
+    };
+    if (typeof IntersectionObserver === "undefined") {
+      const check = () => {
+        if (
+          marker.getBoundingClientRect().top <=
+          root.getBoundingClientRect().bottom + 100
+        )
+          load();
+      };
+      root.addEventListener("scroll", check, { passive: true });
+      check();
+      return () => {
+        active = false;
+        root.removeEventListener("scroll", check);
+      };
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (active && entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          load();
+        }
+      },
+      { root, rootMargin: "0px 0px 100px 0px" },
+    );
+    observer.observe(marker);
+    return () => {
+      active = false;
+      observer.disconnect();
+    };
+  }, [renderLimit, visible, run?.id]);
+
   const pickedTiming = selected ? timing?.byEvent.get(selected.id) : undefined;
   const related = selected?.callId ? results.get(selected.callId) || [] : [];
   return (
@@ -866,7 +914,11 @@ export default function App() {
                 const next = position + (e.key === "ArrowDown" ? 1 : -1);
                 if (next < 0 || next >= visible.length) return;
                 e.preventDefault();
-                setLimit((n) => Math.max(n, next + 1));
+                setLimit((n) =>
+                  next >= Math.max(n, position + 1) - PREFETCH_EVENTS
+                    ? nextEventBatch(Math.max(n, position + 1), visible.length)
+                    : Math.max(n, next + 1),
+                );
                 select(visible[next]);
                 requestAnimationFrame(() => {
                   const row = document.getElementById(
@@ -875,7 +927,19 @@ export default function App() {
                   row
                     ?.querySelector<HTMLButtonElement>(".row-main")
                     ?.focus({ preventScroll: true });
-                  row?.scrollIntoView({ block: "nearest" });
+                  const list = listRef.current;
+                  if (row && list) {
+                    const item = row.getBoundingClientRect(),
+                      viewport = list.getBoundingClientRect();
+                    list.scrollTop = anchoredScrollTop({
+                      scrollTop: list.scrollTop,
+                      viewportHeight: list.clientHeight,
+                      scrollHeight: list.scrollHeight,
+                      itemTop: item.top - viewport.top + list.scrollTop,
+                      itemHeight: item.height,
+                      direction: e.key === "ArrowDown" ? "down" : "up",
+                    });
+                  }
                 });
               }}
             >
@@ -1022,6 +1086,11 @@ export default function App() {
                       <div
                         key={e.id}
                         id={"event-" + e.id}
+                        ref={
+                          i === Math.max(0, renderLimit - PREFETCH_EVENTS)
+                            ? preloadRef
+                            : null
+                        }
                         className="event-block"
                       >
                         {isNewStep && (
@@ -1140,17 +1209,10 @@ export default function App() {
                       </button>
                     </div>
                   )}
-                  {visible.length > renderLimit && (
-                    <button
-                      className="show-more"
-                      onClick={() =>
-                        setLimit(Math.max(renderLimit, limit) + 100)
-                      }
-                    >
-                      Show next {Math.min(100, visible.length - renderLimit)}{" "}
-                      events <ArrowDown size={14} />
-                    </button>
-                  )}
+                  <span className="sr-only" aria-live="polite">
+                    Showing {Math.min(renderLimit, visible.length)} of{" "}
+                    {visible.length} events
+                  </span>
                 </div>
               </section>
               <div
@@ -1185,7 +1247,7 @@ export default function App() {
                   }
                   if (e.key === "Home") {
                     e.preventDefault();
-                    setSplit(46);
+                    setSplit(60);
                   }
                 }}
               >
@@ -1197,7 +1259,7 @@ export default function App() {
                 title="Open event reader"
                 onClick={() => {
                   setReaderHidden(false);
-                  setSplit(46);
+                  setSplit(60);
                 }}
               >
                 <ChevronLeft size={17} />
