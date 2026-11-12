@@ -19,6 +19,7 @@ describe("appearance preferences", () => {
       "sky",
     ]);
     expect(readAppearance({ getItem: () => null })).toEqual(DEFAULT_APPEARANCE);
+    expect(DEFAULT_APPEARANCE).toEqual({ mode: "dark", palette: "sky" });
   });
   it("round-trips all ten supported mode/palette combinations", () => {
     const values = new Map<string, string>();
@@ -43,9 +44,9 @@ describe("appearance preferences", () => {
         palette: "obsolete",
         token: "must-not-persist",
       }),
-    ).toEqual({ mode: "dark", palette: "lavender" });
+    ).toEqual({ mode: "dark", palette: "sky" });
     expect(validateAppearance({ mode: "system", palette: "sage" })).toEqual({
-      mode: "light",
+      mode: "dark",
       palette: "sage",
     });
     for (const value of [null, false, "dark", [], 10, {}])
@@ -86,7 +87,7 @@ describe("appearance preferences", () => {
         },
       },
     );
-    expect(JSON.parse(saved)).toEqual({ mode: "light", palette: "sky" });
+    expect(JSON.parse(saved)).toEqual({ mode: "dark", palette: "sky" });
   });
   it("applies only validated root attributes, including night mode", () => {
     const attributes = new Map<string, string>();
@@ -101,8 +102,8 @@ describe("appearance preferences", () => {
       ["data-palette", "paper"],
     ]);
     applyAppearance({ mode: "unknown", palette: "arbitrary" } as never, root);
-    expect(attributes.get("data-mode")).toBe("light");
-    expect(attributes.get("data-palette")).toBe("lavender");
+    expect(attributes.get("data-mode")).toBe("dark");
+    expect(attributes.get("data-palette")).toBe("sky");
   });
   it("does not fail in a non-browser environment", () => {
     expect(() =>
