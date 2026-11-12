@@ -2987,3 +2987,82 @@ body,
 @media (max-width: 500px) {
   .run-actions .overview-button > span { display: none; }
 }
+
+/* Step intervals / Tokens switch on the run overview. */
+.section-tabs {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 13px;
+}
+.section-tabs button {
+  font-size: 12px;
+  font-weight: 550;
+  padding: 0 0 5px;
+  border-bottom: 2px solid transparent;
+  color: var(--theme-faint);
+}
+.section-tabs button:hover {
+  color: var(--theme-muted);
+}
+.section-tabs button.active {
+  color: var(--theme-text);
+  border-bottom-color: var(--theme-selection-cue);
+}
+.token-table .stage-track {
+  height: 6px;
+}
+.token-bar {
+  display: flex;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.token-bar > i {
+  display: block;
+  height: 100%;
+  flex-basis: 0;
+}
+.token-table strong,
+.token-legend > span:nth-child(n + 3) {
+  width: 46px;
+  flex-shrink: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.token-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 6px;
+  font-size: 10px;
+  color: var(--theme-faint);
+}
+.token-legend > span:first-child {
+  width: 68px;
+  flex-shrink: 0;
+}
+.token-legend > span:nth-child(2) {
+  flex: 1;
+}
+.token-legend > span:nth-child(n + 3)::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  margin-right: 5px;
+  background: currentColor;
+}
+.token-bar > .tok-input,
+.token-legend > .tok-input::before {
+  background: var(--theme-icon-tool);
+}
+.token-bar > .tok-output,
+.token-legend > .tok-output::before {
+  background: var(--theme-icon-assistant);
+}
+.token-bar > .tok-cache,
+.token-legend > .tok-cache::before {
+  background: var(--theme-icon-reasoning);
+}

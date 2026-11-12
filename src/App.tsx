@@ -45,7 +45,7 @@ import {
 import unrollIcon from "./assets/unroll.svg";
 import type { Event as TraceEvent, Usage } from "./parse/types";
 import { analyze, formatSpan, matchExcerpt, foldQuery } from "./analyze";
-import { buildMetrics } from "./metrics";
+import { buildMetrics, tokenSplit } from "./metrics";
 import {
   deleteRun,
   loadRun,
@@ -82,6 +82,12 @@ const textOf = (e: TraceEvent) =>
   e.text || stringify(e.output ?? e.input ?? "");
 const fmt = (value: number | undefined) =>
   value === undefined ? "—" : value.toLocaleString("en-US");
+const compactFormat = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+const compact = (value: number) =>
+  value < 10_000 ? value.toLocaleString("en-US") : compactFormat.format(value);
 const ms = (value: number | undefined) =>
   value === undefined
     ? "—"
@@ -286,6 +292,7 @@ export default function App() {
   const clickedAnchor = useRef<number | null>(null);
   const preloadRef = useRef<HTMLDivElement>(null);
   const [stageLimit, setStageLimit] = useState(100);
+  const [stageTab, setStageTab] = useState<"intervals" | "tokens">("intervals");
   const unsaved = useRef(new Map<string, Run>());
   const runIndex = useRef<RunSummary[]>([]);
   useEffect(() => {
@@ -767,6 +774,14 @@ export default function App() {
     }
   }
   const stageMax = timing?.maxNextGapMs || 1;
+  const tokenMax = useMemo(() => {
+    let max = 0;
+    for (const step of timing?.steps ?? []) {
+      const total = tokenSplit(step.usage)?.total ?? 0;
+      if (total > max) max = total;
+    }
+    return max || 1;
+  }, [timing]);
   const renderLimit = Math.max(limit, position + 1);
   useEffect(() => {
     if (renderLimit >= visible.length) return;
@@ -1700,36 +1715,136 @@ export default function App() {
                         </div>
                       )}
                       <div className="reader-section">
-                        <h3>Step intervals</h3>
-                        <p className="data-note">
-                          Time to the next recorded step. These intervals can
-                          include reasoning, tools, and idle time; they are not
-                          individual tool durations.
-                        </p>
-                        <div className="stage-table">
-                          {timing?.steps.slice(0, stageLimit).map((step) => (
-                            <button
-                              key={step.key}
-                              onClick={() => jump(step.eventId)}
-                            >
-                              <span>{step.label}</span>
-                              <span className="stage-track">
-                                <i
-                                  style={{
-                                    width: `${Math.min(100, ((step.nextGapMs || 0) / stageMax) * 100)}%`,
-                                  }}
-                                />
-                              </span>
-                              <strong>{ms(step.nextGapMs)}</strong>
-                            </button>
-                          ))}
+                        <div className="section-tabs" role="tablist">
+                          <button
+                            role="tab"
+                            aria-selected={stageTab === "intervals"}
+                            className={stageTab === "intervals" ? "active" : ""}
+                            onClick={() => setStageTab("intervals")}
+                          >
+                            Step intervals
+                          </button>
+                          <button
+                            role="tab"
+                            aria-selected={stageTab === "tokens"}
+                            className={stageTab === "tokens" ? "active" : ""}
+                            onClick={() => setStageTab("tokens")}
+                          >
+                            Tokens
+                          </button>
                         </div>
+                        {stageTab === "intervals" ? (
+                          <>
+                            <p className="data-note">
+                              Time to the next recorded step. These intervals
+                              can include reasoning, tools, and idle time; they
+                              are not individual tool durations.
+                            </p>
+                            <div className="stage-table">
+                              {timing?.steps
+                                .slice(0, stageLimit)
+                                .map((step) => (
+                                  <button
+                                    key={step.key}
+                                    onClick={() => jump(step.eventId)}
+                                  >
+                                    <span>{step.label}</span>
+                                    <span className="stage-track">
+                                      <i
+                                        style={{
+                                          width: `${Math.min(100, ((step.nextGapMs || 0) / stageMax) * 100)}%`,
+                                        }}
+                                      />
+                                    </span>
+                                    <strong>{ms(step.nextGapMs)}</strong>
+                                  </button>
+                                ))}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <p className="data-note">
+                              Tokens recorded on each step. Input excludes
+                              cached tokens; cache is read plus write.
+                            </p>
+                            <div className="stage-table token-table">
+                              <div className="token-legend">
+                                <span />
+                                <span />
+                                <span className="tok-input">Input</span>
+                                <span className="tok-output">Output</span>
+                                <span className="tok-cache">Cache</span>
+                              </div>
+                              {timing?.steps
+                                .slice(0, stageLimit)
+                                .map((step) => {
+                                  const split = tokenSplit(step.usage);
+                                  return (
+                                    <button
+                                      key={step.key}
+                                      onClick={() => jump(step.eventId)}
+                                      title={
+                                        split
+                                          ? `Input ${fmt(split.input)} · Output ${fmt(split.output)} · Cache read ${fmt(step.usage?.cacheRead)} · Cache write ${fmt(step.usage?.cacheWrite)}`
+                                          : "No token usage recorded on this step"
+                                      }
+                                    >
+                                      <span>{step.label}</span>
+                                      <span className="stage-track">
+                                        {!!split?.total && (
+                                          <span
+                                            className="token-bar"
+                                            style={{
+                                              width: `${(split.total / tokenMax) * 100}%`,
+                                            }}
+                                          >
+                                            <i
+                                              className="tok-input"
+                                              style={{
+                                                flexGrow: split.input,
+                                                minWidth: split.input ? 2 : 0,
+                                              }}
+                                            />
+                                            <i
+                                              className="tok-output"
+                                              style={{
+                                                flexGrow: split.output,
+                                                minWidth: split.output ? 2 : 0,
+                                              }}
+                                            />
+                                            <i
+                                              className="tok-cache"
+                                              style={{
+                                                flexGrow: split.cache,
+                                                minWidth: split.cache ? 2 : 0,
+                                              }}
+                                            />
+                                          </span>
+                                        )}
+                                      </span>
+                                      <strong>
+                                        {split ? compact(split.input) : "—"}
+                                      </strong>
+                                      <strong>
+                                        {split ? compact(split.output) : "—"}
+                                      </strong>
+                                      <strong>
+                                        {split ? compact(split.cache) : "—"}
+                                      </strong>
+                                    </button>
+                                  );
+                                })}
+                            </div>
+                          </>
+                        )}
                         {(timing?.steps.length || 0) > stageLimit && (
                           <button
                             className="show-more"
                             onClick={() => setStageLimit((n) => n + 100)}
                           >
-                            Show next intervals <ArrowDown size={13} />
+                            Show next{" "}
+                            {stageTab === "intervals" ? "intervals" : "steps"}{" "}
+                            <ArrowDown size={13} />
                           </button>
                         )}
                       </div>
