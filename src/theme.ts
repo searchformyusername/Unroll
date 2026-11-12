@@ -13,8 +13,8 @@ export interface AppearancePreferences {
   palette: Palette;
 }
 export const DEFAULT_APPEARANCE: Readonly<AppearancePreferences> = {
-  mode: "light",
-  palette: "lavender",
+  mode: "dark",
+  palette: "sky",
 };
 type PreferenceStorage = Pick<Storage, "getItem" | "setItem">;
 
