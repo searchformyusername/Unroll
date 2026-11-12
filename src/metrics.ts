@@ -332,3 +332,32 @@ export function buildMetrics(session: Session): Metrics {
   if (maxDuration !== undefined) out.maxDurationMs = maxDuration;
   return out;
 }
+
+/** A step's recorded tokens as three parts that add up to `total`, with nothing counted twice. */
+export interface TokenSplit {
+  /** Prompt tokens that were not cached: Usage.input minus cache read and cache write. */
+  input: number;
+  output: number;
+  /** Cache read plus cache write. */
+  cache: number;
+  total: number;
+}
+
+/** Undefined when the step recorded none of input, output or cache tokens. */
+export function tokenSplit(usage: Usage | undefined): TokenSplit | undefined {
+  if (!usage) return undefined;
+  const { input, output, cacheRead, cacheWrite } = usage;
+  if (
+    input === undefined &&
+    output === undefined &&
+    cacheRead === undefined &&
+    cacheWrite === undefined
+  )
+    return undefined;
+  const cache = (cacheRead ?? 0) + (cacheWrite ?? 0);
+  // Usage.input already includes cached tokens. A source that reports less input than cache is
+  // inconsistent; uncached input is then shown as 0 rather than negative.
+  const uncached = Math.max(0, (input ?? cache) - cache);
+  const out = output ?? 0;
+  return { input: uncached, output: out, cache, total: uncached + out + cache };
+}

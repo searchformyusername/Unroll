@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMetrics, type StepTiming } from "../src/metrics.ts";
+import { buildMetrics, tokenSplit, type StepTiming } from "../src/metrics.ts";
 import { parse } from "../src/parse/index.ts";
 import type { Session, TraceEvent } from "../src/parse/types.ts";
 import { atifDoc, cc, ccSession, codex, jsonl } from "./parse/fixtures.ts";
@@ -452,5 +452,29 @@ describe("edge cases", () => {
       `buildMetrics: ${session.events.length} events in ${ms.toFixed(0)} ms`,
     );
     expect(ms).toBeLessThan(1000);
+  });
+});
+
+describe("tokenSplit", () => {
+  it("splits input into uncached and cache without counting cache twice", () => {
+    expect(
+      tokenSplit({ input: 1000, output: 50, cacheRead: 700, cacheWrite: 200 }),
+    ).toEqual({ input: 100, output: 50, cache: 900, total: 1050 });
+  });
+  it("handles partial usage and returns undefined when no tokens are recorded", () => {
+    expect(tokenSplit({ output: 7 })).toEqual({
+      input: 0,
+      output: 7,
+      cache: 0,
+      total: 7,
+    });
+    expect(tokenSplit({ input: 10, cacheRead: 40 })).toEqual({
+      input: 0,
+      output: 0,
+      cache: 40,
+      total: 40,
+    });
+    expect(tokenSplit(undefined)).toBeUndefined();
+    expect(tokenSplit({ costUsd: 0.1 })).toBeUndefined();
   });
 });
