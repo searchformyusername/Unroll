@@ -3066,3 +3066,32 @@ body,
 .token-legend > .tok-cache::before {
   background: var(--theme-icon-reasoning);
 }
+
+.timeline-column {
+  position: relative;
+}
+.scroll-step {
+  position: absolute;
+  right: 14px;
+  z-index: 2;
+  transform: translateY(-50%);
+  pointer-events: none;
+  user-select: none;
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--theme-reader) 85%, transparent);
+  color: var(--theme-text);
+  box-shadow: 0 0 0 1px var(--theme-border);
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.scroll-step[data-visible] {
+  opacity: 0.94;
+  transition-duration: 0ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scroll-step { transition: none; }
+}

@@ -42,6 +42,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import { ScrollStep } from "./ScrollStep";
 import unrollIcon from "./assets/unroll.svg";
 import type { Event as TraceEvent, Usage } from "./parse/types";
 import { analyze, formatSpan, matchExcerpt, foldQuery } from "./analyze";
@@ -1290,6 +1291,11 @@ export default function App() {
                             ? preloadRef
                             : null
                         }
+                        data-scroll-step={
+                          step && step.grouping !== "event"
+                            ? step.label
+                            : `Event ${e.idx + 1}`
+                        }
                         className="event-block"
                       >
                         {isNewStep && (
@@ -1413,6 +1419,7 @@ export default function App() {
                     {visible.length} events
                   </span>
                 </div>
+                <ScrollStep key={run.id} listRef={listRef} />
               </section>
               <div
                 className="split-handle"
